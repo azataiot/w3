@@ -802,3 +802,56 @@ fn a_name_outside_the_rule_is_refused_before_git_runs() {
     assert_eq!(git(&fx.repo, &["branch", "--list", "release/*"]), "");
     assert!(!fx.home().join(".worktrees/repo").exists());
 }
+
+fn complete(fx: &Fixture, cwd: &Path, words: &[&str]) -> Output {
+    let index = (words.len() - 1).to_string();
+    let mut args = vec!["--"];
+    args.extend_from_slice(words);
+    fx.run(
+        cwd,
+        &args,
+        &[
+            ("COMPLETE", "zsh"),
+            ("_CLAP_COMPLETE_INDEX", &index),
+            ("_CLAP_IFS", "\n"),
+        ],
+    )
+}
+
+#[test]
+fn complete_prints_the_zsh_registration_script() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &[], &[("COMPLETE", "zsh")]);
+    assert!(stdout.contains("compdef"), "{stdout}");
+}
+
+#[test]
+fn the_pattern_completes_from_names_and_branches() {
+    let fx = Fixture::new();
+    add_hotfix_on_fix_login(&fx);
+    let output = complete(&fx, &fx.repo, &["w3", "list", "f"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout, "feature\nfix/login");
+}
+
+#[test]
+fn b_completes_the_branches_no_worktree_holds() {
+    let fx = Fixture::new();
+    git(&fx.repo, &["branch", "release"]);
+    let output = complete(&fx, &fx.repo, &["w3", "add", "x", "-b", ""]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout, "release");
+}
+
+#[test]
+fn completion_outside_a_repo_is_silent() {
+    let fx = Fixture::new();
+    let outside = fx.home().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let output = complete(&fx, &outside, &["w3", "list", "f"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}

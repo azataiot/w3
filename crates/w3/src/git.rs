@@ -43,6 +43,14 @@ pub fn add(repo: &Path, path: &Path, branch: Branch, base: Option<&str>) -> Resu
     run(&mut command).map(drop)
 }
 
+pub fn branches(repo: &Path) -> Result<Vec<String>, Error> {
+    let stdout = run(git(repo).args(["for-each-ref", "--format=%(refname:short)", "refs/heads"]))?;
+    Ok(String::from_utf8_lossy(&stdout)
+        .lines()
+        .map(str::to_string)
+        .collect())
+}
+
 pub fn included_files(repo: &Path, include: &Path) -> Result<Vec<PathBuf>, Error> {
     if !repo.join(include).is_file() {
         return Ok(Vec::new());

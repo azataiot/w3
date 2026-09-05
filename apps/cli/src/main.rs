@@ -1,9 +1,11 @@
 use std::io::IsTerminal;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{ArgValueCandidates, CompleteEnv};
 
 mod add;
+mod complete;
 mod config;
 mod current;
 mod filter;
@@ -59,6 +61,7 @@ struct AddArgs {
         short = 'b',
         long,
         value_name = "BRANCH",
+        add = ArgValueCandidates::new(complete::branch_candidates),
         help = "Check out this existing branch instead of creating NAME"
     )]
     branch: Option<String>,
@@ -87,6 +90,7 @@ struct AddArgs {
 struct ListArgs {
     #[arg(
         value_name = "PATTERN",
+        add = ArgValueCandidates::new(complete::pattern_candidates),
         help = "Keep the rows whose name or branch matches this regex, case-insensitive unless it has an uppercase letter"
     )]
     pattern: Option<String>,
@@ -113,6 +117,7 @@ struct ListArgs {
 }
 
 fn main() -> anyhow::Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
     match cli.command {
         Command::List(args) => list(args),

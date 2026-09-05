@@ -180,3 +180,21 @@ fn a_missing_include_file_copies_nothing() {
 
     assert!(files.is_empty());
 }
+
+#[test]
+fn branches_are_the_local_heads_in_git_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = repo_with_commit(tmp.path());
+    git(&repo, &["branch", "zeta"]);
+    git(&repo, &["branch", "alpha/one"]);
+    assert_eq!(w3::branches(&repo).unwrap(), ["alpha/one", "main", "zeta"]);
+}
+
+#[test]
+fn a_repo_without_commits_has_no_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("empty");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q"]);
+    assert_eq!(w3::branches(&repo).unwrap(), Vec::<String>::new());
+}
