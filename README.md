@@ -37,6 +37,22 @@ For the tip of main you need git 2.36 or later and a Rust toolchain from
 cargo install --git https://github.com/azataiot/w3 w3-cli
 ```
 
+Tab completion offers the names and branches of the current repository. It
+is sourced at shell start, not installed as a file, so the shell code and
+the binary never drift. One line in the shell's rc file:
+
+```sh
+source <(COMPLETE=zsh w3)
+```
+
+```sh
+source <(COMPLETE=bash w3)
+```
+
+```sh
+COMPLETE=fish w3 | source
+```
+
 ## Use
 
 | Command | What it does |
@@ -76,6 +92,15 @@ w3 list --format json
 Flags override everything: `--format table|plain|json`, `--head-length N`,
 `--columns name,branch,head,state,path`, `--fields path,head,branch,bare,locked,prunable,current`.
 
+A pattern keeps the rows whose name or branch matches:
+
+```sh
+w3 list feat
+```
+
+The pattern is a regex, so `'fix|feat'` and `^hot` work. It ignores case
+unless it has an uppercase letter. No match prints nothing and exits 0.
+
 ### Add
 
 ```sh
@@ -88,6 +113,7 @@ gitignored files that `.worktreeinclude` names, and prints the path. Each copied
 stderr. `-b <branch>` checks out an existing branch instead, `--base <ref>`
 starts the new branch elsewhere, `--path <template>` moves the worktree, and
 `--include <file>` names another include file. An empty include copies nothing.
+A name uses ASCII letters, digits, `-`, `_`, and `/` only.
 
 `.worktreeinclude` follows the Claude Code rules: gitignore syntax, and only a
 file that matches a pattern and is also gitignored is copied. Symlinks are
