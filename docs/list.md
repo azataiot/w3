@@ -79,18 +79,13 @@ matches. No match prints nothing and exits 0. A pattern that does not
 compile is an error that shows where it failed.
 
 Press Tab after `w3 list` to complete the pattern from the names and
-branches of the repository, once [completion](README.md#tab-completion) is
-set up.
+branches of the repository, once the [shell setup](README.md#shell-setup) is
+done.
 
 ## Jump between worktrees
 
-With `fzf`:
-
-```sh
-cd "$(w3 list | fzf | cut -f1)"
-```
-
-Without `fzf`, a pattern and `cut` do the same:
+[`w3 cd`](cd.md) does this with a list that filters as you type. In a
+script, the plain output and `cut` give the path of one match:
 
 ```sh
 cd "$(w3 list fix-login | cut -f1)"

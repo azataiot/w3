@@ -37,20 +37,21 @@ For the tip of main you need git 2.36 or later and a Rust toolchain from
 cargo install --git https://github.com/azataiot/w3 w3-cli
 ```
 
-Tab completion offers the names and branches of the current repository. It
-is sourced at shell start, not installed as a file, so the shell code and
-the binary never drift. One line in the shell's rc file:
+One line in the shell's rc file lets `w3 cd` change directory and loads tab
+completion, which offers the names and branches of the current repository.
+Both come from the binary at shell start, so the shell code and the binary
+never drift. In zsh, put the line after `compinit`.
 
 ```sh
-source <(COMPLETE=zsh w3)
+eval "$(w3 init zsh)"
 ```
 
 ```sh
-source <(COMPLETE=bash w3)
+eval "$(w3 init bash)"
 ```
 
-```sh
-COMPLETE=fish w3 | source
+```fish
+w3 init fish | source
 ```
 
 ## Use
@@ -60,6 +61,8 @@ COMPLETE=fish w3 | source
 | `w3 list` | List the worktrees of the current repository |
 | `w3 add <name>` | Create a worktree on a new branch and print its path |
 | `w3 cp <name>` | Copy the current worktree, changes included, onto a new branch and print its path |
+| `w3 cd [pattern]` | Go to a worktree, picked from a list that filters as you type, or by pattern |
+| `w3 init <shell>` | Print the shell function that makes `w3 cd` change directory and loads completion |
 
 Every command takes `--help`. The [user guide](docs/README.md) has one page
 per command and one for the settings.
@@ -80,7 +83,7 @@ In a pipe, one worktree per line, tab-separated, absolute paths, no header.
 The columns are path, head, branch, state:
 
 ```sh
-cd "$(w3 list | fzf | cut -f1)"
+w3 list | cut -f1
 ```
 
 For an agent or a script, JSON with the full SHA:
@@ -100,6 +103,19 @@ w3 list feat
 
 The pattern is a regex, so `'fix|feat'` and `^hot` work. It ignores case
 unless it has an uppercase letter. No match prints nothing and exits 0.
+
+### Go
+
+```sh
+w3 cd
+```
+
+A list of the worktrees, name, branch, and path, that filters as you type.
+Tab or the arrows move the highlight, Enter goes there, Esc stays. `w3 cd
+spike` goes to the one worktree that matches, with no list. Several matches
+open the list with those rows. Bare and prunable worktrees are not offered.
+The function from `w3 init` does the `cd`. Without it, `cd "$(w3 cd spike)"`
+works the same, and a script gets the path on stdout.
 
 ### Add
 

@@ -12,6 +12,7 @@ This guide has one page per command and one for the settings:
 | [list](list.md) | See every worktree, jump between them, or feed them to a script |
 | [add](add.md) | Start a new branch in a new directory, with your local files in place |
 | [cp](cp.md) | Copy the worktree you are in, unfinished changes included, and continue in a copy |
+| [cd](cd.md) | Go to a worktree from a list that filters as you type, or by name |
 | [configuration](configuration.md) | Change the defaults once, for you or for one repository |
 
 ## The five-minute tour
@@ -43,32 +44,41 @@ cd "$(w3 cp fix-login-alt)"
 
 You are in a copy: same commits, same staged and unstaged changes, same
 untracked files, on the new branch `fix-login-alt`. The original stays as it
-was.
+was. Back to the first one:
+
+```sh
+w3 cd fix-login
+```
+
+One match, so you are there at once. `w3 cd` alone opens a list that filters
+as you type, once the [shell function](#shell-setup) is loaded.
 
 Every command prints the path of the worktree on stdout and everything else
 on stderr, so `cd "$(w3 …)"` always works.
 
-## Tab completion
+## Shell setup
 
-w3 completes its flags, the pattern of `w3 list`, and the branch of
-`w3 add -b` from the repository you are in. The shell asks w3 at Tab time,
-so the candidates are always the real worktrees and branches. One line in
-your shell's rc file:
+One line in your shell's rc file lets `w3 cd` change directory and loads tab
+completion. w3 completes its flags, the pattern of `w3 list` and `w3 cd`,
+and the branch of `w3 add -b` from the repository you are in. The shell asks
+w3 at Tab time, so the candidates are always the real worktrees and
+branches.
 
 ```sh
-source <(COMPLETE=zsh w3)
+eval "$(w3 init zsh)"
 ```
 
 ```sh
-source <(COMPLETE=bash w3)
+eval "$(w3 init bash)"
 ```
 
-```sh
-COMPLETE=fish w3 | source
+```fish
+w3 init fish | source
 ```
 
-It is sourced at shell start, not installed as a file, so the shell code and
-the binary never drift apart.
+The code comes from the binary at shell start, not from an installed file,
+so the shell code and the binary never drift apart. In zsh, put the line
+after `compinit`, or completion stays off while `w3 cd` still works.
 
 ## Conventions in this guide
 
