@@ -1,0 +1,19 @@
+[package]
+name = "w3-cli"
+description = "A fast CLI for git worktrees, built for humans and coding agents who work on many branches at once."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "w3"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+w3.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

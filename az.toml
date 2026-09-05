@@ -1,0 +1,12 @@
+[project]
+name = "w3"
+owner = "azataiot"
+repo = "https://github.com/azataiot/w3"
+
+[workflow]
+branch  = "pr"
+merge   = "squash"
+release = "none"
+test  = "just test"
+lint  = "just lint"
+check = "just qa"
