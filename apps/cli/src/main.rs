@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 mod add;
 mod config;
 mod current;
+mod filter;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -85,6 +86,11 @@ struct AddArgs {
 #[derive(clap::Args)]
 struct ListArgs {
     #[arg(
+        value_name = "PATTERN",
+        help = "Keep the rows whose name or branch matches this regex, case-insensitive unless it has an uppercase letter"
+    )]
+    pattern: Option<String>,
+    #[arg(
         long,
         value_name = "table|plain|json",
         help = "Output mode, default table on a terminal and plain in a pipe"
@@ -135,17 +141,33 @@ fn list(args: ListArgs) -> anyhow::Result<()> {
         ..Layer::default()
     };
     let settings = settings(flags, &cwd).map_err(anyhow::Error::msg)?;
+    let matcher = args
+        .pattern
+        .as_deref()
+        .map(|pattern| {
+            filter::matcher(pattern).map_err(|error| format!("pattern {pattern}: {error}"))
+        })
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
     let worktrees = w3::list(&cwd)?;
     let current = current::current_index(&worktrees, &cwd);
     let rows: Vec<Row> = worktrees
         .iter()
         .enumerate()
+        .filter(|(_, worktree)| {
+            matcher
+                .as_ref()
+                .is_none_or(|regex| filter::matches(regex, worktree))
+        })
         .map(|(index, worktree)| Row {
             worktree,
             current: Some(index) == current,
         })
         .collect();
     let mode = settings.mode(std::io::stdout().is_terminal());
+    if rows.is_empty() && mode == Format::Table {
+        return Ok(());
+    }
     let output = match mode {
         Format::Table => {
             let home = std::env::home_dir();
@@ -164,6 +186,7 @@ fn list(args: ListArgs) -> anyhow::Result<()> {
 }
 
 fn add(args: AddArgs) -> anyhow::Result<()> {
+    add::check_name(&args.name).map_err(anyhow::Error::msg)?;
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let flags = Layer {
         worktree_path: args.path,

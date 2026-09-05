@@ -689,3 +689,116 @@ fn cp_help_documents_the_three_arguments() {
     }
     assert!(!stdout.contains("--base"), "{stdout}");
 }
+
+fn add_hotfix_on_fix_login(fx: &Fixture) -> PathBuf {
+    let hotfix = fx.home().join("hotfix");
+    git(
+        &fx.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "fix/login",
+            hotfix.to_str().unwrap(),
+        ],
+    );
+    hotfix
+}
+
+fn first_cells(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(|line| line.split('\t').next().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_pattern_narrows_plain_output_to_the_matching_rows() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["list", "feat"], &[]);
+    assert_eq!(first_cells(&stdout), [fx.feature.to_str().unwrap()]);
+}
+
+#[test]
+fn a_pattern_matches_on_the_branch_when_the_name_differs() {
+    let fx = Fixture::new();
+    let hotfix = add_hotfix_on_fix_login(&fx);
+    let stdout = fx.stdout(&fx.repo, &["list", "login"], &[]);
+    assert_eq!(first_cells(&stdout), [hotfix.to_str().unwrap()]);
+    let stdout = fx.stdout(&fx.repo, &["list", "^hot"], &[]);
+    assert_eq!(first_cells(&stdout), [hotfix.to_str().unwrap()]);
+}
+
+#[test]
+fn json_returns_only_the_matches() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["list", "feat", "--format", "json"], &[]);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(rows.len(), 1, "{stdout}");
+    assert_eq!(rows[0]["branch"], "feature");
+}
+
+#[test]
+fn no_match_is_exit_0_with_empty_output() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.repo, &["list", "zzz"], &[]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    let table = fx.stdout(&fx.repo, &["list", "zzz", "--format", "table"], &[]);
+    assert_eq!(table, "");
+    let json = fx.stdout(&fx.repo, &["list", "zzz", "--format", "json"], &[]);
+    assert_eq!(json, "[]\n");
+}
+
+#[test]
+fn an_uppercase_letter_in_the_pattern_matches_case() {
+    let fx = Fixture::new();
+    assert_eq!(fx.stdout(&fx.repo, &["list", "Feat"], &[]), "");
+    let stdout = fx.stdout(&fx.repo, &["list", "fEAT"], &[]);
+    assert_eq!(stdout, "");
+    let stdout = fx.stdout(&fx.repo, &["list", "FEATURE"], &[]);
+    assert_eq!(stdout, "");
+    let stdout = fx.stdout(&fx.repo, &["list", "feature"], &[]);
+    assert_eq!(first_cells(&stdout), [fx.feature.to_str().unwrap()]);
+}
+
+#[test]
+fn an_invalid_pattern_fails_before_git_runs() {
+    let fx = Fixture::new();
+    let outside = fx.home().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let output = fx.run(&outside, &["list", "a("], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.starts_with("Error: pattern a(: regex parse error:"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("unclosed group"), "{stderr}");
+    assert!(!stderr.contains("git"), "{stderr}");
+}
+
+#[test]
+fn list_help_documents_the_pattern() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["list", "--help"], &[]);
+    assert!(stdout.contains("[PATTERN]"), "{stdout}");
+}
+
+#[test]
+fn a_name_outside_the_rule_is_refused_before_git_runs() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.repo, &["add", "release/1.2"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr,
+        "Error: name must use letters, digits, -, _, and /: found '.'\n"
+    );
+    assert_eq!(git(&fx.repo, &["branch", "--list", "release/*"]), "");
+    assert!(!fx.home().join(".worktrees/repo").exists());
+}

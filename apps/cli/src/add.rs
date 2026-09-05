@@ -6,6 +6,16 @@ pub struct Copied {
     pub skipped: Vec<PathBuf>,
 }
 
+pub fn check_name(name: &str) -> Result<(), String> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/');
+    match name.chars().find(|c| !allowed(*c)) {
+        Some(found) => Err(format!(
+            "name must use letters, digits, -, _, and /: found '{found}'"
+        )),
+        None => Ok(()),
+    }
+}
+
 pub fn directory_name(name: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("name must not be empty".to_string());
@@ -88,6 +98,29 @@ mod tests {
     #[test]
     fn directory_name_flattens_slashes() {
         assert_eq!(directory_name("az/fix-7"), Ok("az-fix-7".to_string()));
+    }
+
+    #[test]
+    fn check_name_accepts_the_five_classes() {
+        for name in ["feat", "Feat9", "a-b", "a_b", "a/b/c"] {
+            assert_eq!(check_name(name), Ok(()), "{name}");
+        }
+    }
+
+    #[test]
+    fn check_name_names_the_first_offending_character() {
+        assert_eq!(
+            check_name("release/1.2"),
+            Err("name must use letters, digits, -, _, and /: found '.'".to_string())
+        );
+        assert_eq!(
+            check_name("feat(api)"),
+            Err("name must use letters, digits, -, _, and /: found '('".to_string())
+        );
+        assert_eq!(
+            check_name("f\u{fc}r"),
+            Err("name must use letters, digits, -, _, and /: found '\u{fc}'".to_string())
+        );
     }
 
     #[test]

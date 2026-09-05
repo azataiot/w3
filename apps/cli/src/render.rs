@@ -194,7 +194,7 @@ fn plain_cell(row: &Row, column: Column, head_length: usize) -> String {
     }
 }
 
-fn name(path: &Path) -> String {
+pub(crate) fn name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
