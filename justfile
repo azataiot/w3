@@ -17,3 +17,9 @@ qa:
     cargo fmt --all --check
     just lint
     just test
+
+release level:
+    cargo release {{level}} --execute
+
+release-dry level:
+    cargo release {{level}}

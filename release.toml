@@ -1,0 +1,6 @@
+shared-version = true
+consolidate-commits = true
+tag-prefix = ""
+pre-release-commit-message = "chore: release {{version}}"
+allow-branch = ["main"]
+dependent-version = "upgrade"
