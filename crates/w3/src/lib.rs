@@ -1,7 +1,10 @@
 mod git;
 mod worktree;
 
-pub use git::{Branch, add, included_files, list};
+pub use git::{
+    Apply, Branch, Changes, add, apply, changes, delete_branch, included_files, list, remove,
+    untracked_files,
+};
 pub use worktree::{Worktree, parse_porcelain};
 
 #[derive(Debug, thiserror::Error)]
