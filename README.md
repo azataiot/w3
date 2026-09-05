@@ -74,8 +74,8 @@ cd "$(w3 add feature-x)"
 ```
 
 `w3 add` creates `~/.worktrees/<repo>/feature-x` on the new branch
-`feature-x` from the current `HEAD`, copies the gitignored files that
-`.worktreeinclude` names, and prints the path. Each copied file is one line on
+`feature-x` from the `HEAD` of the worktree you run it in, copies the
+gitignored files that `.worktreeinclude` names, and prints the path. Each copied file is one line on
 stderr. `-b <branch>` checks out an existing branch instead, `--base <ref>`
 starts the new branch elsewhere, `--path <template>` moves the worktree, and
 `--include <file>` names another include file. An empty include copies nothing.

@@ -169,7 +169,7 @@ fn add(args: AddArgs) -> anyhow::Result<()> {
         Some(existing) => w3::Branch::Existing(existing),
         None => w3::Branch::New(&args.name),
     };
-    w3::add(&main.path, &target, branch, settings.add_base.as_deref())?;
+    w3::add(&cwd, &target, branch, settings.add_base.as_deref())?;
     if !settings.add_include.is_empty() {
         let files = w3::included_files(&main.path, Path::new(&settings.add_include))?;
         let copied = add::copy_included(&main.path, &target, &files).map_err(anyhow::Error::msg)?;

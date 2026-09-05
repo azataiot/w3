@@ -458,3 +458,38 @@ fn add_help_documents_the_five_arguments() {
         assert!(stdout.contains(piece), "{stdout}");
     }
 }
+
+#[test]
+fn add_from_a_secondary_worktree_starts_at_its_head() {
+    let fx = Fixture::new();
+    git(
+        &fx.feature,
+        &["commit", "-q", "--allow-empty", "-m", "on feature"],
+    );
+    let feature_head = git(&fx.feature, &["rev-parse", "HEAD"]);
+    assert_ne!(feature_head, fx.head);
+    let stdout = fx.stdout(&fx.feature, &["add", "spike"], &[]);
+    let path = Path::new(stdout.trim());
+    assert_eq!(git_out(path, &["rev-parse", "HEAD"]), feature_head);
+    assert_eq!(
+        git_out(path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "spike"
+    );
+}
+
+#[test]
+fn add_from_a_subdirectory_of_a_worktree_starts_at_its_head() {
+    let fx = Fixture::new();
+    git(
+        &fx.feature,
+        &["commit", "-q", "--allow-empty", "-m", "on feature"],
+    );
+    let feature_head = git(&fx.feature, &["rev-parse", "HEAD"]);
+    let deep = fx.feature.join("src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+    let stdout = fx.stdout(&deep, &["add", "spike"], &[]);
+    assert_eq!(
+        git_out(Path::new(stdout.trim()), &["rev-parse", "HEAD"]),
+        feature_head
+    );
+}
