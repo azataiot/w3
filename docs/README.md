@@ -48,6 +48,28 @@ was.
 Every command prints the path of the worktree on stdout and everything else
 on stderr, so `cd "$(w3 …)"` always works.
 
+## Tab completion
+
+w3 completes its flags, the pattern of `w3 list`, and the branch of
+`w3 add -b` from the repository you are in. The shell asks w3 at Tab time,
+so the candidates are always the real worktrees and branches. One line in
+your shell's rc file:
+
+```sh
+source <(COMPLETE=zsh w3)
+```
+
+```sh
+source <(COMPLETE=bash w3)
+```
+
+```sh
+COMPLETE=fish w3 | source
+```
+
+It is sourced at shell start, not installed as a file, so the shell code and
+the binary never drift apart.
+
 ## Conventions in this guide
 
 - `<repo>` is the directory name of the main checkout, for example `w3` for

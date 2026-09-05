@@ -58,6 +58,30 @@ w3 list --format json
 `locked` and `prunable` carry the reason git recorded, or `null`. `branch` is
 `null` for a detached worktree.
 
+## Find a worktree
+
+A pattern keeps the rows whose name or branch matches it:
+
+```sh
+w3 list fix
+```
+
+```text
+  NAME       BRANCH     HEAD      STATE   PATH
+  fix-login  fix-login  5e6f7a8b  locked  ~/.worktrees/app/fix-login
+```
+
+The pattern is a regular expression. `fix|spike` matches either, `^fix`
+anchors at the start, and `login$` at the end. It ignores case unless it has
+an uppercase letter: `fix` finds `Fix-Login`, `Fix` finds only that. The
+filter applies in every output mode, so `--format json` returns only the
+matches. No match prints nothing and exits 0. A pattern that does not
+compile is an error that shows where it failed.
+
+Press Tab after `w3 list` to complete the pattern from the names and
+branches of the repository, once [completion](README.md#tab-completion) is
+set up.
+
 ## Jump between worktrees
 
 With `fzf`:
@@ -66,16 +90,17 @@ With `fzf`:
 cd "$(w3 list | fzf | cut -f1)"
 ```
 
-Without `fzf`, the plain output and `grep` do the same:
+Without `fzf`, a pattern and `cut` do the same:
 
 ```sh
-cd "$(w3 list | grep fix-login | cut -f1)"
+cd "$(w3 list fix-login | cut -f1)"
 ```
 
 ## Flags
 
 | Flag | Effect |
 |---|---|
+| `[pattern]` | Keep the rows whose name or branch matches this regular expression, see above |
 | `--format table\|plain\|json` | Force one output mode. The default is table on a terminal and plain in a pipe |
 | `--head-length N` | Show N characters of the commit in table and plain output, 1 to 40, default 8 |
 | `--columns name,branch,head,state,path` | Pick and order the columns of table and plain output |

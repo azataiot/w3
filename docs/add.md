@@ -22,8 +22,13 @@ for the branch and becomes a `-` in the directory:
 w3 add az/fix-7
 ```
 
-This checks out the branch `az/fix-7` in `~/.worktrees/<repo>/az-fix-7`. A
-name that is empty or starts with `-` is refused.
+This checks out the branch `az/fix-7` in `~/.worktrees/<repo>/az-fix-7`.
+
+A name uses ASCII letters, digits, `-`, `_`, and `/` only. Any other
+character, a dot or a parenthesis for example, is refused with one line that
+names it. This keeps every name w3 makes a plain word for the pattern of
+[`w3 list`](list.md#find-a-worktree). A name that is empty or starts with
+`-` is refused too.
 
 ## Your local files
 
@@ -55,7 +60,7 @@ that says so.
 
 | Flag | Effect |
 |---|---|
-| `-b, --branch <branch>` | Check out an existing branch instead of creating one. The name still names the directory |
+| `-b, --branch <branch>` | Check out an existing branch instead of creating one. The name still names the directory. Tab completes it from the branches no worktree holds, once [completion](README.md#tab-completion) is set up |
 | `--base <ref>` | Start the new branch at this commit or branch instead of `HEAD`, for example `origin/main` |
 | `--path <template>` | Put the worktree somewhere else, see below |
 | `--include <file>` | Use another include file, relative to the main checkout. An empty value copies nothing |
