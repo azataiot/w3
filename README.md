@@ -45,7 +45,8 @@ cargo install --git https://github.com/azataiot/w3 w3-cli
 | `w3 add <name>` | Create a worktree on a new branch and print its path |
 | `w3 cp <name>` | Copy the current worktree, changes included, onto a new branch and print its path |
 
-Every command takes `--help`.
+Every command takes `--help`. The [user guide](docs/README.md) has one page
+per command and one for the settings.
 
 ```sh
 w3 list
