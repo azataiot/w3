@@ -56,7 +56,6 @@ impl Fixture {
         let home = self.home();
         let mut command = Command::new(W3);
         command
-            .arg("list")
             .args(args)
             .current_dir(cwd)
             .env_clear()
@@ -101,7 +100,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 #[test]
 fn a_pipe_gets_plain_tsv_with_absolute_paths() {
     let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.repo, &[], &[]);
+    let stdout = fx.stdout(&fx.repo, &["list"], &[]);
     let lines: Vec<Vec<&str>> = stdout
         .lines()
         .map(|line| line.split('\t').collect())
@@ -119,7 +118,7 @@ fn a_pipe_gets_plain_tsv_with_absolute_paths() {
 #[test]
 fn a_table_has_a_header_a_marker_and_home_paths() {
     let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.repo, &["--format", "table"], &[]);
+    let stdout = fx.stdout(&fx.repo, &["list", "--format", "table"], &[]);
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 3, "{stdout}");
     assert!(lines[0].starts_with("  NAME"), "{}", lines[0]);
@@ -138,7 +137,7 @@ fn a_table_has_a_header_a_marker_and_home_paths() {
 #[test]
 fn the_marker_follows_the_working_directory() {
     let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.feature, &["--format", "table"], &[]);
+    let stdout = fx.stdout(&fx.feature, &["list", "--format", "table"], &[]);
     let lines: Vec<&str> = stdout.lines().collect();
     assert!(lines[1].starts_with("  repo"), "{}", lines[1]);
     assert!(lines[2].starts_with("* feature"), "{}", lines[2]);
@@ -147,7 +146,7 @@ fn the_marker_follows_the_working_directory() {
 #[test]
 fn json_has_the_seven_fields_in_order_with_the_full_sha() {
     let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.repo, &["--format", "json"], &[]);
+    let stdout = fx.stdout(&fx.repo, &["list", "--format", "json"], &[]);
     assert_eq!(stdout.lines().count(), 1, "{stdout}");
     let rows: Vec<serde_json::Map<String, serde_json::Value>> =
         serde_json::from_str(&stdout).unwrap();
@@ -171,7 +170,7 @@ fn json_has_the_seven_fields_in_order_with_the_full_sha() {
 fn the_user_file_sets_the_head_length() {
     let fx = Fixture::new();
     fx.write_user_config("head_length = 12\n");
-    let stdout = fx.stdout(&fx.repo, &[], &[]);
+    let stdout = fx.stdout(&fx.repo, &["list"], &[]);
     let first: Vec<&str> = stdout.lines().next().unwrap().split('\t').collect();
     assert_eq!(first[1], &fx.head[..12]);
 }
@@ -180,7 +179,7 @@ fn the_user_file_sets_the_head_length() {
 fn the_repo_az_toml_narrows_the_plain_columns() {
     let fx = Fixture::new();
     fx.write_az_toml("[project]\nname = \"x\"\n\n[w3.plain]\ncolumns = [\"path\"]\n");
-    let stdout = fx.stdout(&fx.repo, &[], &[]);
+    let stdout = fx.stdout(&fx.repo, &["list"], &[]);
     for line in stdout.lines() {
         assert!(!line.contains('\t'), "{line}");
     }
@@ -192,7 +191,7 @@ fn the_environment_wins_over_both_files() {
     let fx = Fixture::new();
     fx.write_user_config("[format]\npipe = \"plain\"\n");
     fx.write_az_toml("[w3.format]\npipe = \"plain\"\n");
-    let stdout = fx.stdout(&fx.repo, &[], &[("W3_FORMAT", "json")]);
+    let stdout = fx.stdout(&fx.repo, &["list"], &[("W3_FORMAT", "json")]);
     assert!(stdout.starts_with('['), "{stdout}");
 }
 
@@ -201,7 +200,7 @@ fn the_flag_wins_over_the_environment() {
     let fx = Fixture::new();
     let stdout = fx.stdout(
         &fx.repo,
-        &["--head-length", "4"],
+        &["list", "--head-length", "4"],
         &[("W3_HEAD_LENGTH", "20")],
     );
     let first: Vec<&str> = stdout.lines().next().unwrap().split('\t').collect();
@@ -211,7 +210,7 @@ fn the_flag_wins_over_the_environment() {
 #[test]
 fn an_unknown_column_fails_with_one_error_line() {
     let fx = Fixture::new();
-    let output = fx.run(&fx.repo, &["--columns", "nope"], &[]);
+    let output = fx.run(&fx.repo, &["list", "--columns", "nope"], &[]);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
@@ -226,7 +225,7 @@ fn an_unknown_column_fails_with_one_error_line() {
 fn a_typo_in_the_user_file_names_the_file() {
     let fx = Fixture::new();
     fx.write_user_config("head_len = 3\n");
-    let output = fx.run(&fx.repo, &[], &[]);
+    let output = fx.run(&fx.repo, &["list"], &[]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("xdg/w3/config.toml"), "{stderr}");
@@ -236,7 +235,7 @@ fn a_typo_in_the_user_file_names_the_file() {
 #[test]
 fn help_documents_the_four_flags() {
     let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.repo, &["--help"], &[]);
+    let stdout = fx.stdout(&fx.repo, &["list", "--help"], &[]);
     for flag in ["--format", "--head-length", "--columns", "--fields"] {
         assert!(stdout.contains(flag), "{stdout}");
     }
@@ -247,10 +246,215 @@ fn list_outside_a_repo_fails_with_one_line() {
     let fx = Fixture::new();
     let outside = fx.home().join("outside");
     std::fs::create_dir(&outside).unwrap();
-    let output = fx.run(&outside, &[], &[]);
+    let output = fx.run(&outside, &["list"], &[]);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
     assert!(stderr.starts_with("Error: "), "{stderr}");
+}
+
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    git(dir, args)
+}
+
+fn write_ignored(fx: &Fixture) {
+    let repo = &fx.repo;
+    std::fs::write(repo.join(".env"), "secret\n").unwrap();
+    std::fs::write(repo.join("real.txt"), "real\n").unwrap();
+    std::os::unix::fs::symlink("real.txt", repo.join("link")).unwrap();
+    std::fs::create_dir(repo.join("nested")).unwrap();
+    std::os::unix::fs::symlink("nested", repo.join("dirlink")).unwrap();
+    std::fs::write(repo.join("keep.txt"), "tracked\n").unwrap();
+    git(repo, &["add", "keep.txt"]);
+    git(repo, &["commit", "-q", "-m", "keep"]);
+    std::fs::write(
+        repo.join(".gitignore"),
+        ".env\nreal.txt\nlink\nnested/\ndirlink\n.worktreeinclude\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join(".worktreeinclude"),
+        "/.env\nlink\nkeep.txt\ndirlink\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn add_creates_a_worktree_under_the_home_default() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["add", "feature-x"], &[]);
+    let expected = fx.home().join(".worktrees/repo/feature-x");
+    assert_eq!(stdout, format!("{}\n", expected.display()));
+    assert!(expected.join(".git").exists());
+    assert_eq!(
+        git_out(&expected, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "feature-x"
+    );
+    assert_eq!(git_out(&expected, &["rev-parse", "HEAD"]), fx.head);
+}
+
+#[test]
+fn add_checks_out_an_existing_branch_with_b() {
+    let fx = Fixture::new();
+    git(&fx.repo, &["branch", "existing"]);
+    let stdout = fx.stdout(&fx.repo, &["add", "wt", "-b", "existing"], &[]);
+    let path = Path::new(stdout.trim());
+    assert!(path.ends_with(".worktrees/repo/wt"), "{stdout}");
+    assert_eq!(
+        git_out(path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "existing"
+    );
+}
+
+#[test]
+fn add_starts_the_branch_at_the_given_base() {
+    let fx = Fixture::new();
+    let first = fx.head.clone();
+    git(&fx.repo, &["commit", "-q", "--allow-empty", "-m", "second"]);
+    let stdout = fx.stdout(&fx.repo, &["add", "old", "--base", &first], &[]);
+    assert_eq!(
+        git_out(Path::new(stdout.trim()), &["rev-parse", "HEAD"]),
+        first
+    );
+}
+
+#[test]
+fn base_with_branch_is_rejected_before_anything_runs() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.repo, &["add", "x", "-b", "main", "--base", "HEAD"], &[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!fx.home().join(".worktrees").exists());
+}
+
+#[test]
+fn add_copies_included_files_and_skips_the_rest() {
+    let fx = Fixture::new();
+    write_ignored(&fx);
+    let output = fx.run(&fx.repo, &["add", "wt"], &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let target = fx.home().join(".worktrees/repo/wt");
+    assert_eq!(
+        std::fs::read_to_string(target.join(".env")).unwrap(),
+        "secret\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(target.join("link")).unwrap(),
+        "real\n"
+    );
+    assert!(!target.join("link").is_symlink());
+    assert!(!target.join("dirlink").exists());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let lines: Vec<&str> = stderr.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "copied .env",
+            "copied link",
+            "skipped dirlink: not a regular file"
+        ],
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_existing_directory_is_a_collision() {
+    let fx = Fixture::new();
+    fx.stdout(&fx.repo, &["add", "wt"], &[]);
+    let output = fx.run(&fx.repo, &["add", "wt"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.starts_with("Error: "), "{stderr}");
+    assert!(stderr.contains("exists"), "{stderr}");
+}
+
+#[test]
+fn an_existing_branch_without_b_is_a_collision() {
+    let fx = Fixture::new();
+    git(&fx.repo, &["branch", "taken"]);
+    let output = fx.run(&fx.repo, &["add", "taken"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.starts_with("Error: "), "{stderr}");
+    assert!(stderr.contains("taken"), "{stderr}");
+    assert!(!fx.home().join(".worktrees/repo/taken").exists());
+}
+
+#[test]
+fn a_bare_main_checkout_is_refused() {
+    let fx = Fixture::new();
+    let bare = fx.home().join("bare.git");
+    git(
+        &fx.repo,
+        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
+    );
+    let output = fx.run(&bare, &["add", "wt"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.starts_with("Error: "), "{stderr}");
+    assert!(stderr.contains("bare"), "{stderr}");
+}
+
+#[test]
+fn the_environment_beats_az_toml_and_the_flag_beats_both() {
+    let fx = Fixture::new();
+    let home = fx.home();
+    fx.write_az_toml(&format!(
+        "[w3.add]\npath = \"{}/from-file/{{name}}\"\n",
+        home.display()
+    ));
+    let env_template = format!("{}/from-env/{{name}}", home.display());
+    let stdout = fx.stdout(&fx.repo, &["add", "one"], &[("W3_ADD_PATH", &env_template)]);
+    assert_eq!(stdout.trim(), home.join("from-env/one").to_str().unwrap());
+    let flag_template = format!("{}/from-flag/{{name}}", home.display());
+    let stdout = fx.stdout(
+        &fx.repo,
+        &["add", "two", "--path", &flag_template],
+        &[("W3_ADD_PATH", &env_template)],
+    );
+    assert_eq!(stdout.trim(), home.join("from-flag/two").to_str().unwrap());
+}
+
+#[test]
+fn an_empty_include_copies_nothing() {
+    let fx = Fixture::new();
+    write_ignored(&fx);
+    let output = fx.run(&fx.repo, &["add", "wt", "--include", ""], &[]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(!fx.home().join(".worktrees/repo/wt/.env").exists());
+}
+
+#[test]
+fn list_shows_the_new_worktree_as_current_from_inside_it() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["add", "wt"], &[]);
+    let target = Path::new(stdout.trim());
+    let list = fx.stdout(target, &["list", "--format", "plain"], &[]);
+    let rows: Vec<Vec<&str>> = list
+        .lines()
+        .map(|line| line.split('\t').collect())
+        .collect();
+    assert_eq!(rows.len(), 3, "{list}");
+    let row = rows
+        .iter()
+        .find(|row| Path::new(row[0]) == target)
+        .expect("new row");
+    assert_eq!(row[2], "wt");
+    assert_eq!(row[3], "current");
+}
+
+#[test]
+fn add_help_documents_the_five_arguments() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["add", "--help"], &[]);
+    for piece in ["<NAME>", "--branch", "--base", "--path", "--include"] {
+        assert!(stdout.contains(piece), "{stdout}");
+    }
 }

@@ -36,6 +36,9 @@ pub struct Layer {
     pub plain_columns: Option<Vec<Column>>,
     pub columns: Option<Vec<Column>>,
     pub fields: Option<Vec<Field>>,
+    pub add_path: Option<String>,
+    pub add_include: Option<String>,
+    pub add_base: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,6 +51,9 @@ pub struct Settings {
     pub plain_columns: Vec<Column>,
     pub columns: Option<Vec<Column>>,
     pub fields: Vec<Field>,
+    pub add_path: String,
+    pub add_include: String,
+    pub add_base: Option<String>,
 }
 
 impl Settings {
@@ -91,6 +97,9 @@ pub fn resolve(layers: &[Layer]) -> Settings {
             Field::Prunable,
             Field::Current,
         ],
+        add_path: "~/.worktrees/{repo}/{name}".to_string(),
+        add_include: ".worktreeinclude".to_string(),
+        add_base: None,
     };
     for layer in layers {
         if let Some(format) = layer.format {
@@ -117,6 +126,15 @@ pub fn resolve(layers: &[Layer]) -> Settings {
         if let Some(fields) = &layer.fields {
             settings.fields = fields.clone();
         }
+        if let Some(path) = &layer.add_path {
+            settings.add_path = path.clone();
+        }
+        if let Some(include) = &layer.add_include {
+            settings.add_include = include.clone();
+        }
+        if let Some(base) = &layer.add_base {
+            settings.add_base = Some(base.clone());
+        }
     }
     settings
 }
@@ -129,6 +147,15 @@ struct FileConfig {
     table: Option<ColumnsSection>,
     plain: Option<ColumnsSection>,
     json: Option<FieldsSection>,
+    add: Option<AddSection>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AddSection {
+    path: Option<String>,
+    include: Option<String>,
+    base: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -153,6 +180,7 @@ struct FieldsSection {
 impl FileConfig {
     fn into_layer(self) -> Result<Layer, String> {
         let format = self.format.unwrap_or_default();
+        let add = self.add.unwrap_or_default();
         Ok(Layer {
             format: None,
             format_tty: format.tty,
@@ -162,6 +190,9 @@ impl FileConfig {
             plain_columns: self.plain.and_then(|section| section.columns),
             columns: None,
             fields: self.json.and_then(|section| section.fields),
+            add_path: add.path,
+            add_include: add.include,
+            add_base: add.base,
         })
     }
 }
@@ -248,6 +279,9 @@ pub fn from_env(var: impl Fn(&str) -> Option<String>) -> Result<Layer, String> {
     if let Some(value) = var("W3_FIELDS") {
         layer.fields = Some(parse_list(&value).map_err(|error| format!("W3_FIELDS: {error}"))?);
     }
+    layer.add_path = var("W3_ADD_PATH");
+    layer.add_include = var("W3_ADD_INCLUDE");
+    layer.add_base = var("W3_ADD_BASE");
     Ok(layer)
 }
 
@@ -270,6 +304,11 @@ columns = ["path"]
 
 [json]
 fields = ["path", "current"]
+
+[add]
+path = "~/wt/{repo}/{name}"
+include = ".w3include"
+base = "origin/main"
 "#;
 
     fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
@@ -288,6 +327,9 @@ fields = ["path", "current"]
             plain_columns: Some(vec![Column::Path]),
             columns: None,
             fields: Some(vec![Field::Path, Field::Current]),
+            add_path: Some("~/wt/{repo}/{name}".to_string()),
+            add_include: Some(".w3include".to_string()),
+            add_base: Some("origin/main".to_string()),
         }
     }
 
@@ -318,6 +360,7 @@ fields = ["path", "current"]
                 .replacen("[table]", "[w3.table]", 1)
                 .replacen("[plain]", "[w3.plain]", 1)
                 .replacen("[json]", "[w3.json]", 1)
+                .replacen("[add]", "[w3.add]", 1)
         );
         let path = write(tmp.path(), "az.toml", &text);
         assert_eq!(load_repo_file(&path), Ok(full_layer()));
@@ -375,6 +418,9 @@ fields = ["path", "current"]
             "W3_HEAD_LENGTH" => Some("40".into()),
             "W3_COLUMNS" => Some("head, name".into()),
             "W3_FIELDS" => Some("current".into()),
+            "W3_ADD_PATH" => Some("/tmp/{name}".into()),
+            "W3_ADD_INCLUDE" => Some(String::new()),
+            "W3_ADD_BASE" => Some("main".into()),
             _ => None,
         })
         .unwrap();
@@ -385,6 +431,9 @@ fields = ["path", "current"]
                 head_length: Some(40),
                 columns: Some(vec![Column::Head, Column::Name]),
                 fields: Some(vec![Field::Current]),
+                add_path: Some("/tmp/{name}".into()),
+                add_include: Some(String::new()),
+                add_base: Some("main".into()),
                 ..Layer::default()
             }
         );
@@ -436,6 +485,9 @@ fields = ["path", "current"]
             vec![Column::Path, Column::Head, Column::Branch, Column::State]
         );
         assert_eq!(settings.columns, None);
+        assert_eq!(settings.add_path, "~/.worktrees/{repo}/{name}");
+        assert_eq!(settings.add_include, ".worktreeinclude");
+        assert_eq!(settings.add_base, None);
         assert_eq!(
             settings.fields,
             vec![
@@ -463,6 +515,18 @@ fields = ["path", "current"]
         assert_eq!(settings.format, Some(Format::Table));
         assert_eq!(settings.format_tty, Format::Plain);
         assert_eq!(settings.table_columns, vec![Column::Name, Column::Path]);
+        assert_eq!(settings.add_path, "~/wt/{repo}/{name}");
+        assert_eq!(settings.add_base.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
+    fn an_empty_include_at_a_later_layer_disables_copying() {
+        let second = Layer {
+            add_include: Some(String::new()),
+            ..Layer::default()
+        };
+        let settings = resolve(&[full_layer(), second]);
+        assert_eq!(settings.add_include, "");
     }
 
     #[test]

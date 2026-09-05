@@ -1,7 +1,7 @@
 mod git;
 mod worktree;
 
-pub use git::list;
+pub use git::{Branch, add, included_files, list};
 pub use worktree::{Worktree, parse_porcelain};
 
 #[derive(Debug, thiserror::Error)]

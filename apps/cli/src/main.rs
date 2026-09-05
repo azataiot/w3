@@ -3,9 +3,12 @@ use std::io::IsTerminal;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
+mod add;
 mod config;
 mod current;
 mod render;
+
+use std::path::Path;
 
 use config::{Format, Layer, Settings};
 use render::{Column, Field, Row, parse_list};
@@ -21,6 +24,40 @@ struct Cli {
 enum Command {
     #[command(about = "List the worktrees of the current repository")]
     List(ListArgs),
+    #[command(about = "Create a worktree on a new branch and print its path")]
+    Add(AddArgs),
+}
+
+#[derive(clap::Args)]
+struct AddArgs {
+    #[arg(value_name = "NAME", help = "New branch and directory name")]
+    name: String,
+    #[arg(
+        short = 'b',
+        long,
+        value_name = "BRANCH",
+        help = "Check out this existing branch instead of creating NAME"
+    )]
+    branch: Option<String>,
+    #[arg(
+        long,
+        value_name = "REF",
+        conflicts_with = "branch",
+        help = "Start the new branch here, default HEAD"
+    )]
+    base: Option<String>,
+    #[arg(
+        long,
+        value_name = "TEMPLATE",
+        help = "Where the worktree goes, default ~/.worktrees/{repo}/{name}"
+    )]
+    path: Option<String>,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Include file relative to the main checkout, default .worktreeinclude, empty copies nothing"
+    )]
+    include: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -51,12 +88,30 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::List(args) => list(args),
+        Command::Add(args) => add(args),
     }
 }
 
 fn list(args: ListArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
-    let settings = settings(&args, &cwd).map_err(anyhow::Error::msg)?;
+    let flags = Layer {
+        format: args.format,
+        head_length: args.head_length.map(usize::from),
+        columns: args
+            .columns
+            .as_deref()
+            .map(|text| parse_list::<Column>(text).map_err(|error| format!("--columns: {error}")))
+            .transpose()
+            .map_err(anyhow::Error::msg)?,
+        fields: args
+            .fields
+            .as_deref()
+            .map(|text| parse_list::<Field>(text).map_err(|error| format!("--fields: {error}")))
+            .transpose()
+            .map_err(anyhow::Error::msg)?,
+        ..Layer::default()
+    };
+    let settings = settings(flags, &cwd).map_err(anyhow::Error::msg)?;
     let worktrees = w3::list(&cwd)?;
     let current = current::current_index(&worktrees, &cwd);
     let rows: Vec<Row> = worktrees
@@ -85,7 +140,51 @@ fn list(args: ListArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn settings(args: &ListArgs, cwd: &std::path::Path) -> Result<Settings, String> {
+fn add(args: AddArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir().context("cannot read the current directory")?;
+    let flags = Layer {
+        add_path: args.path,
+        add_include: args.include,
+        add_base: args.base,
+        ..Layer::default()
+    };
+    let settings = settings(flags, &cwd).map_err(anyhow::Error::msg)?;
+    let worktrees = w3::list(&cwd)?;
+    let main = worktrees
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("no worktree found"))?;
+    if main.bare {
+        anyhow::bail!("the main checkout is bare, there is nothing to copy from");
+    }
+    let repo = add::directory_name(&main.path.file_name().unwrap_or_default().to_string_lossy())
+        .map_err(anyhow::Error::msg)?;
+    let directory = add::directory_name(&args.name).map_err(anyhow::Error::msg)?;
+    let home = std::env::home_dir();
+    let target = add::target_path(&settings.add_path, home.as_deref(), &repo, &directory)
+        .map_err(anyhow::Error::msg)?;
+    if target.exists() {
+        anyhow::bail!("{} exists", target.display());
+    }
+    let branch = match &args.branch {
+        Some(existing) => w3::Branch::Existing(existing),
+        None => w3::Branch::New(&args.name),
+    };
+    w3::add(&main.path, &target, branch, settings.add_base.as_deref())?;
+    if !settings.add_include.is_empty() {
+        let files = w3::included_files(&main.path, Path::new(&settings.add_include))?;
+        let copied = add::copy_included(&main.path, &target, &files).map_err(anyhow::Error::msg)?;
+        for file in &copied.copied {
+            eprintln!("copied {}", file.display());
+        }
+        for file in &copied.skipped {
+            eprintln!("skipped {}: not a regular file", file.display());
+        }
+    }
+    println!("{}", target.display());
+    Ok(())
+}
+
+fn settings(flags: Layer, cwd: &Path) -> Result<Settings, String> {
     let user = config::user_file(
         std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
         std::env::home_dir().as_deref(),
@@ -98,21 +197,6 @@ fn settings(args: &ListArgs, cwd: &std::path::Path) -> Result<Settings, String> 
         .transpose()?
         .unwrap_or_default();
     let env = config::from_env(|name| std::env::var(name).ok())?;
-    let flags = Layer {
-        format: args.format,
-        head_length: args.head_length.map(usize::from),
-        columns: args
-            .columns
-            .as_deref()
-            .map(|text| parse_list::<Column>(text).map_err(|error| format!("--columns: {error}")))
-            .transpose()?,
-        fields: args
-            .fields
-            .as_deref()
-            .map(|text| parse_list::<Field>(text).map_err(|error| format!("--fields: {error}")))
-            .transpose()?,
-        ..Layer::default()
-    };
     Ok(config::resolve(&[user, repo, env, flags]))
 }
 
