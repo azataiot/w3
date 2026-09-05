@@ -12,15 +12,19 @@ shipped.
 
 ## Install
 
-w3 is pre-release. Every command below pins the current alpha.
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/azataiot/w3/releases/download/v0.1.0-alpha.1/w3-cli-installer.sh | sh
-```
+w3 is pre-release. Homebrew is the recommended path:
 
 ```sh
 brew install azataiot/tap/w3
 ```
+
+The install script installs the latest stable release:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/azataiot/w3/main/scripts/install.sh | sh
+```
+
+From crates.io, with a Rust toolchain:
 
 ```sh
 cargo install w3-cli --version 0.1.0-alpha.1
