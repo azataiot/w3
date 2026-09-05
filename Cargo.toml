@@ -4,13 +4,13 @@ members = ["apps/cli", "crates/w3"]
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 license = "MIT"
 repository = "https://github.com/azataiot/w3"
 homepage = "https://github.com/azataiot/w3"
 
 [workspace.dependencies]
-w3 = { path = "crates/w3", version = "0.1.0-alpha.1" }
+w3 = { path = "crates/w3", version = "0.1.0-alpha.2" }
 
 [profile.release]
 lto = true
