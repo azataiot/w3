@@ -4,7 +4,7 @@ owner = "azataiot"
 repo = "https://github.com/azataiot/w3"
 
 [workflow]
-branch  = "pr"
+branch  = "direct"
 merge   = "squash"
 release = "none"
 test  = "just test"
