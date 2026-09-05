@@ -236,9 +236,7 @@ struct Screen {
 impl Screen {
     fn open() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
-        let mut screen = Self { out: io::stderr() };
-        execute!(screen.out, cursor::Hide)?;
-        Ok(screen)
+        Ok(Self { out: io::stderr() })
     }
 
     fn draw(&mut self, picker: &mut Picker) -> io::Result<()> {
@@ -276,7 +274,8 @@ impl Screen {
             ResetColor
         )?;
         let drawn = 1 + window.len().max(1) as u16;
-        queue!(self.out, cursor::MoveUp(drawn), cursor::MoveToColumn(0))?;
+        let caret = (PROMPT.chars().count() + picker.query().chars().count()) as u16;
+        queue!(self.out, cursor::MoveUp(drawn), cursor::MoveToColumn(caret))?;
         self.out.flush()
     }
 
@@ -327,8 +326,11 @@ impl Screen {
 
 impl Drop for Screen {
     fn drop(&mut self) {
-        let _ = self.clear();
-        let _ = execute!(self.out, cursor::Show);
+        let _ = execute!(
+            self.out,
+            cursor::MoveToColumn(0),
+            terminal::Clear(terminal::ClearType::FromCursorDown)
+        );
         let _ = terminal::disable_raw_mode();
     }
 }
