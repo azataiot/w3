@@ -67,6 +67,23 @@ w3 list --format json
 Flags override everything: `--format table|plain|json`, `--head-length N`,
 `--columns name,branch,head,state,path`, `--fields path,head,branch,bare,locked,prunable,current`.
 
+### Add
+
+```sh
+cd "$(w3 add feature-x)"
+```
+
+`w3 add` creates `~/.worktrees/<repo>/feature-x` on the new branch
+`feature-x` from the current `HEAD`, copies the gitignored files that
+`.worktreeinclude` names, and prints the path. Each copied file is one line on
+stderr. `-b <branch>` checks out an existing branch instead, `--base <ref>`
+starts the new branch elsewhere, `--path <template>` moves the worktree, and
+`--include <file>` names another include file. An empty include copies nothing.
+
+`.worktreeinclude` follows the Claude Code rules: gitignore syntax, and only a
+file that matches a pattern and is also gitignored is copied. Symlinks are
+copied as real files. A worktree from either tool carries the same files.
+
 ### Configure
 
 Defaults come from, in rising precedence: `~/.config/w3/config.toml` (or
@@ -89,10 +106,16 @@ columns = ["path", "head", "branch", "state"]
 
 [json]
 fields = ["path", "head", "branch", "bare", "locked", "prunable", "current"]
+
+[add]
+path = "~/.worktrees/{repo}/{name}"
+include = ".worktreeinclude"
 ```
 
-In `az.toml` the same keys sit under `[w3]`, `[w3.format]`, `[w3.table]`,
-`[w3.plain]`, and `[w3.json]`.
+`add.base` names a default base ref and is unset by default, meaning `HEAD`.
+The variables are `W3_ADD_PATH`, `W3_ADD_INCLUDE`, and `W3_ADD_BASE`. In
+`az.toml` the same keys sit under `[w3]`, `[w3.format]`, `[w3.table]`,
+`[w3.plain]`, `[w3.json]`, and `[w3.add]`.
 
 ## Layout
 
