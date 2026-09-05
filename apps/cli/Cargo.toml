@@ -15,6 +15,8 @@ path = "src/main.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "~4.6", features = ["unstable-dynamic"] }
+crossterm = "0.29"
+nucleo-matcher = "0.3"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

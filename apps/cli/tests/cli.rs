@@ -855,3 +855,165 @@ fn completion_outside_a_repo_is_silent() {
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
 }
+
+#[test]
+fn cd_prints_the_path_of_the_one_match() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["cd", "feature"], &[]);
+    assert_eq!(stdout, format!("{}\n", fx.feature.display()));
+}
+
+#[test]
+fn cd_with_many_matches_and_no_terminal_lists_them_and_fails() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.repo, &["cd"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.starts_with("Error: 2 worktrees"), "{stderr}");
+    assert!(stderr.contains("* repo"), "{stderr}");
+    assert!(stderr.contains("  feature"), "{stderr}");
+}
+
+#[test]
+fn cd_with_no_match_fails_with_one_line() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.repo, &["cd", "nope"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "Error: no worktree matches nope\n"
+    );
+}
+
+#[test]
+fn cd_skips_a_prunable_worktree() {
+    let fx = Fixture::new();
+    let hotfix = add_hotfix_on_fix_login(&fx);
+    std::fs::remove_dir_all(&hotfix).unwrap();
+    let output = fx.run(&fx.repo, &["cd", "hotfix"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "Error: no worktree matches hotfix\n"
+    );
+}
+
+#[test]
+fn cd_help_documents_the_pattern() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["cd", "--help"], &[]);
+    assert!(stdout.contains("[PATTERN]"), "{stdout}");
+}
+
+#[test]
+fn the_cd_pattern_completes_from_names_and_branches() {
+    let fx = Fixture::new();
+    let output = complete(&fx, &fx.repo, &["w3", "cd", "f"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "feature");
+}
+
+#[test]
+fn init_prints_a_function_that_calls_this_binary() {
+    let fx = Fixture::new();
+    for shell in ["zsh", "bash", "fish"] {
+        let stdout = fx.stdout(&fx.repo, &["init", shell], &[]);
+        assert!(stdout.contains(&format!("'{W3}'")), "{stdout}");
+        assert!(stdout.contains("w3"), "{stdout}");
+    }
+}
+
+#[test]
+fn init_rejects_an_unknown_shell() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.repo, &["init", "elvish"], &[]);
+    assert_eq!(output.status.code(), Some(2));
+}
+
+fn shell(fx: &Fixture, shell: &str, script: &str) -> Output {
+    let home = fx.home();
+    Command::new(shell)
+        .args(["-c", script])
+        .current_dir(&fx.repo)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join("xdg"))
+        .output()
+        .unwrap()
+}
+
+fn shell_lines(fx: &Fixture, name: &str, commands: &str) -> (Vec<String>, String) {
+    let output = shell(
+        fx,
+        name,
+        &format!("eval \"$('{W3}' init {name})\"; {commands}"),
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    (stdout.lines().map(String::from).collect(), stderr)
+}
+
+#[test]
+fn the_shell_function_changes_directory_on_one_match() {
+    let fx = Fixture::new();
+    for name in ["zsh", "bash"] {
+        let (lines, stderr) = shell_lines(&fx, name, "w3 cd feature; pwd");
+        assert_eq!(lines, [fx.feature.to_str().unwrap()], "{name}: {stderr}");
+        assert!(stderr.is_empty(), "{name}: {stderr}");
+    }
+}
+
+#[test]
+fn the_shell_function_stays_put_on_no_match() {
+    let fx = Fixture::new();
+    for name in ["zsh", "bash"] {
+        let (lines, stderr) = shell_lines(&fx, name, "w3 cd nope; echo \"status $?\"; pwd");
+        assert_eq!(lines, ["status 1", fx.repo.to_str().unwrap()], "{name}");
+        assert_eq!(stderr, "Error: no worktree matches nope\n", "{name}");
+    }
+}
+
+#[test]
+fn the_shell_function_prints_help_instead_of_moving() {
+    let fx = Fixture::new();
+    for name in ["zsh", "bash"] {
+        let (lines, _) = shell_lines(&fx, name, "w3 cd --help; pwd");
+        assert!(
+            lines.iter().any(|line| line.contains("[PATTERN]")),
+            "{name}: {lines:?}"
+        );
+        assert_eq!(lines.last().unwrap(), fx.repo.to_str().unwrap(), "{name}");
+    }
+}
+
+#[test]
+fn the_shell_function_passes_other_commands_through() {
+    let fx = Fixture::new();
+    for name in ["zsh", "bash"] {
+        let (lines, _) = shell_lines(&fx, name, "w3 list | cut -f1");
+        assert_eq!(
+            lines,
+            [fx.repo.to_str().unwrap(), fx.feature.to_str().unwrap()],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_init_scripts_parse_in_their_shell() {
+    let fx = Fixture::new();
+    for name in ["zsh", "bash", "fish"] {
+        let script = fx.stdout(&fx.repo, &["init", name], &[]);
+        match Command::new(name).arg("-n").arg("-c").arg(&script).output() {
+            Ok(output) => assert!(
+                output.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+            Err(_) => eprintln!("skipped: {name} not installed"),
+        }
+    }
+}

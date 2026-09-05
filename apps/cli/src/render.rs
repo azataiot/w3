@@ -118,37 +118,68 @@ pub fn parse_list<T: FromStr<Err = String>>(text: &str) -> Result<Vec<T>, String
 }
 
 pub fn table(rows: &[Row], columns: &[Column], head_length: usize, home: Option<&Path>) -> String {
-    let cells: Vec<Vec<String>> = rows
+    let header: Vec<String> = columns
         .iter()
+        .map(|column| column.header().to_string())
+        .collect();
+    let cells = table_cells(rows, columns, head_length, home);
+    let widths = column_widths(std::iter::once(&header).chain(&cells), columns.len());
+    let mut out = format!("{}\n", table_line(' ', &header, &widths));
+    for (row, row_cells) in rows.iter().zip(&cells) {
+        out.push_str(&table_line(marker(row), row_cells, &widths));
+        out.push('\n');
+    }
+    out
+}
+
+pub fn labels(
+    rows: &[Row],
+    columns: &[Column],
+    head_length: usize,
+    home: Option<&Path>,
+) -> Vec<String> {
+    let cells = table_cells(rows, columns, head_length, home);
+    let widths = column_widths(&cells, columns.len());
+    rows.iter()
+        .zip(&cells)
+        .map(|(row, row_cells)| table_line(marker(row), row_cells, &widths))
+        .collect()
+}
+
+fn marker(row: &Row) -> char {
+    if row.current { '*' } else { ' ' }
+}
+
+fn table_cells(
+    rows: &[Row],
+    columns: &[Column],
+    head_length: usize,
+    home: Option<&Path>,
+) -> Vec<Vec<String>> {
+    rows.iter()
         .map(|row| {
             columns
                 .iter()
                 .map(|column| table_cell(row, *column, head_length, home))
                 .collect()
         })
-        .collect();
-    let widths: Vec<usize> = columns
-        .iter()
-        .enumerate()
-        .map(|(index, column)| {
-            cells
-                .iter()
-                .map(|row| row[index].chars().count())
-                .chain(std::iter::once(column.header().chars().count()))
+        .collect()
+}
+
+fn column_widths<'a>(
+    lines: impl IntoIterator<Item = &'a Vec<String>> + Clone,
+    count: usize,
+) -> Vec<usize> {
+    (0..count)
+        .map(|index| {
+            lines
+                .clone()
+                .into_iter()
+                .map(|line| line[index].chars().count())
                 .max()
                 .unwrap_or(0)
         })
-        .collect();
-    let header: Vec<String> = columns
-        .iter()
-        .map(|column| column.header().to_string())
-        .collect();
-    let mut out = table_line(' ', &header, &widths);
-    for (row, row_cells) in rows.iter().zip(&cells) {
-        let marker = if row.current { '*' } else { ' ' };
-        out.push_str(&table_line(marker, row_cells, &widths));
-    }
-    out
+        .collect()
 }
 
 fn table_line(marker: char, cells: &[String], widths: &[usize]) -> String {
@@ -159,8 +190,7 @@ fn table_line(marker: char, cells: &[String], widths: &[usize]) -> String {
         let padding = width.saturating_sub(cell.chars().count());
         line.extend(std::iter::repeat_n(' ', padding + 1));
     }
-    let trimmed = line.trim_end();
-    format!("{trimmed}\n")
+    line.trim_end().to_string()
 }
 
 fn table_cell(row: &Row, column: Column, head_length: usize, home: Option<&Path>) -> String {
@@ -438,6 +468,30 @@ mod tests {
             "  NAME   BRANCH             HEAD      STATE  PATH\n\
              * alpha  main               14b96db3         /work/alpha\n\
              \x20 b      feature/long-name  14b96db3         /work/b\n"
+        );
+    }
+
+    #[test]
+    fn labels_align_without_a_header_and_mark_the_current_row() {
+        let a = worktree("/home/u/work/alpha", Some("main"));
+        let b = worktree("/home/u/work/b", Some("feature/long-name"));
+        let rows = [
+            Row {
+                worktree: &a,
+                current: false,
+            },
+            Row {
+                worktree: &b,
+                current: true,
+            },
+        ];
+        let columns = [Column::Name, Column::Branch, Column::Path];
+        assert_eq!(
+            labels(&rows, &columns, 8, Some(Path::new("/home/u"))),
+            [
+                "  alpha  main               ~/work/alpha",
+                "* b      feature/long-name  ~/work/b",
+            ]
         );
     }
 

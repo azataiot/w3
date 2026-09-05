@@ -5,10 +5,13 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{ArgValueCandidates, CompleteEnv};
 
 mod add;
+mod cd;
 mod complete;
 mod config;
 mod current;
 mod filter;
+mod init;
+mod picker;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -33,6 +36,28 @@ enum Command {
         about = "Copy the current worktree, changes included, onto a new branch and print its path"
     )]
     Cp(CpArgs),
+    #[command(
+        about = "Print the path of one worktree, from a pattern or a picker. Loaded with w3 init, it changes directory"
+    )]
+    Cd(CdArgs),
+    #[command(about = "Print the shell code that makes w3 cd change directory and adds completion")]
+    Init(InitArgs),
+}
+
+#[derive(clap::Args)]
+struct CdArgs {
+    #[arg(
+        value_name = "PATTERN",
+        add = ArgValueCandidates::new(complete::pattern_candidates),
+        help = "Keep the worktrees whose name or branch matches this regex, case-insensitive unless it has an uppercase letter"
+    )]
+    pattern: Option<String>,
+}
+
+#[derive(clap::Args)]
+struct InitArgs {
+    #[arg(value_name = "SHELL", help = "The shell of the rc file")]
+    shell: init::Shell,
 }
 
 #[derive(clap::Args)]
@@ -123,7 +148,70 @@ fn main() -> anyhow::Result<()> {
         Command::List(args) => list(args),
         Command::Add(args) => add(args),
         Command::Cp(args) => cp(args),
+        Command::Cd(args) => cd(args),
+        Command::Init(args) => init(args),
     }
+}
+
+const CD_COLUMNS: [Column; 3] = [Column::Name, Column::Branch, Column::Path];
+const CD_SEARCH_COLUMNS: [Column; 2] = [Column::Name, Column::Branch];
+const CANCELLED: i32 = 130;
+
+fn cd(args: CdArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir().context("cannot read the current directory")?;
+    let matcher = args
+        .pattern
+        .as_deref()
+        .map(|pattern| {
+            filter::matcher(pattern).map_err(|error| format!("pattern {pattern}: {error}"))
+        })
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
+    let worktrees = w3::list(&cwd)?;
+    let current = current::current_index(&worktrees, &cwd);
+    let rows = cd::candidates(&worktrees, current, matcher.as_ref());
+    let home = std::env::home_dir();
+    let labels = render::labels(&rows, &CD_COLUMNS, 0, home.as_deref());
+    let picked = match rows.len() {
+        0 => match &args.pattern {
+            Some(pattern) => anyhow::bail!("no worktree matches {pattern}"),
+            None => anyhow::bail!("no worktree to go to"),
+        },
+        1 => 0,
+        count if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) => {
+            let scope = match &args.pattern {
+                Some(pattern) => format!("match {pattern}, refine the pattern"),
+                None => "in the repository, give a pattern".to_string(),
+            };
+            anyhow::bail!(
+                "{count} worktrees {scope} or pick on a terminal:\n{}",
+                labels.join("\n")
+            );
+        }
+        _ => {
+            let entries = render::labels(&rows, &CD_SEARCH_COLUMNS, 0, None)
+                .into_iter()
+                .zip(&labels)
+                .map(|(searchable, label)| picker::Entry {
+                    label: label.clone(),
+                    search_end: searchable.chars().count(),
+                })
+                .collect();
+            let start = rows.iter().position(|row| row.current).unwrap_or(0);
+            match picker::pick(entries, start).context("cannot draw the picker")? {
+                Some(index) => index,
+                None => std::process::exit(CANCELLED),
+            }
+        }
+    };
+    println!("{}", rows[picked].worktree.path.display());
+    Ok(())
+}
+
+fn init(args: InitArgs) -> anyhow::Result<()> {
+    let exe = std::env::current_exe().context("cannot find the w3 binary")?;
+    print!("{}", init::script(args.shell, &exe));
+    Ok(())
 }
 
 fn list(args: ListArgs) -> anyhow::Result<()> {
