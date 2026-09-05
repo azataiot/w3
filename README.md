@@ -12,7 +12,22 @@ shipped.
 
 ## Install
 
-You need git 2.36 or later and a Rust toolchain from <https://rustup.rs>.
+w3 is pre-release. Every command below pins the current alpha.
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/azataiot/w3/releases/download/v0.1.0-alpha.1/w3-cli-installer.sh | sh
+```
+
+```sh
+brew install azataiot/tap/w3
+```
+
+```sh
+cargo install w3-cli --version 0.1.0-alpha.1
+```
+
+For the tip of main you need git 2.36 or later and a Rust toolchain from
+<https://rustup.rs>.
 
 ```sh
 cargo install --git https://github.com/azataiot/w3 w3-cli
