@@ -84,6 +84,21 @@ starts the new branch elsewhere, `--path <template>` moves the worktree, and
 file that matches a pattern and is also gitignored is copied. Symlinks are
 copied as real files. A worktree from either tool carries the same files.
 
+### Copy
+
+```sh
+cd "$(w3 cp spike)"
+```
+
+`w3 cp` copies the worktree you run it in into a new one on the new branch
+`spike`, at the same `HEAD`. It carries the staged changes into the index and
+the unstaged changes into the working tree. It copies the untracked files, and
+the gitignored files that `.worktreeinclude` names. The include file comes
+from the main checkout, the files from the worktree you copy. Each copied file
+is one line on stderr. If a step fails after the worktree exists, w3 removes
+it and the branch again. `--path` and `--include` work as in `w3 add`.
+`add.base` does not apply.
+
 ### Configure
 
 Defaults come from, in rising precedence: `~/.config/w3/config.toml` (or
