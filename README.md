@@ -27,7 +27,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/azataiot
 From crates.io, with a Rust toolchain:
 
 ```sh
-cargo install w3-cli --version 0.1.0-alpha.1
+cargo install w3-cli
 ```
 
 For the tip of main you need git 2.36 or later and a Rust toolchain from
