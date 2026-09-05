@@ -8,7 +8,7 @@ mod config;
 mod current;
 mod render;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use config::{Format, Layer, Settings};
 use render::{Column, Field, Row, parse_list};
@@ -26,6 +26,28 @@ enum Command {
     List(ListArgs),
     #[command(about = "Create a worktree on a new branch and print its path")]
     Add(AddArgs),
+    #[command(
+        about = "Copy the current worktree, changes included, onto a new branch and print its path"
+    )]
+    Cp(CpArgs),
+}
+
+#[derive(clap::Args)]
+struct CpArgs {
+    #[arg(value_name = "NAME", help = "New branch and directory name")]
+    name: String,
+    #[arg(
+        long,
+        value_name = "TEMPLATE",
+        help = "Where the worktree goes, default ~/.worktrees/{repo}/{name}"
+    )]
+    path: Option<String>,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Include file relative to the main checkout, default .worktreeinclude, empty copies nothing"
+    )]
+    include: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -89,6 +111,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::List(args) => list(args),
         Command::Add(args) => add(args),
+        Command::Cp(args) => cp(args),
     }
 }
 
@@ -150,21 +173,8 @@ fn add(args: AddArgs) -> anyhow::Result<()> {
     };
     let settings = settings(flags, &cwd).map_err(anyhow::Error::msg)?;
     let worktrees = w3::list(&cwd)?;
-    let main = worktrees
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("no worktree found"))?;
-    if main.bare {
-        anyhow::bail!("the main checkout is bare, there is nothing to copy from");
-    }
-    let repo = add::directory_name(&main.path.file_name().unwrap_or_default().to_string_lossy())
-        .map_err(anyhow::Error::msg)?;
-    let directory = add::directory_name(&args.name).map_err(anyhow::Error::msg)?;
-    let home = std::env::home_dir();
-    let target = add::target_path(&settings.add_path, home.as_deref(), &repo, &directory)
-        .map_err(anyhow::Error::msg)?;
-    if target.exists() {
-        anyhow::bail!("{} exists", target.display());
-    }
+    let main = main_checkout(&worktrees)?;
+    let target = target(&settings, main, &args.name)?;
     let branch = match &args.branch {
         Some(existing) => w3::Branch::Existing(existing),
         None => w3::Branch::New(&args.name),
@@ -172,15 +182,87 @@ fn add(args: AddArgs) -> anyhow::Result<()> {
     w3::add(&cwd, &target, branch, settings.add_base.as_deref())?;
     if !settings.add_include.is_empty() {
         let files = w3::included_files(&main.path, Path::new(&settings.add_include))?;
-        let copied = add::copy_included(&main.path, &target, &files).map_err(anyhow::Error::msg)?;
-        for file in &copied.copied {
-            eprintln!("copied {}", file.display());
-        }
-        for file in &copied.skipped {
-            eprintln!("skipped {}: not a regular file", file.display());
-        }
+        copy_from(&main.path, &target, &files)?;
     }
     println!("{}", target.display());
+    Ok(())
+}
+
+fn cp(args: CpArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir().context("cannot read the current directory")?;
+    let flags = Layer {
+        add_path: args.path,
+        add_include: args.include,
+        ..Layer::default()
+    };
+    let settings = settings(flags, &cwd).map_err(anyhow::Error::msg)?;
+    let worktrees = w3::list(&cwd)?;
+    let main = main_checkout(&worktrees)?;
+    let source = current::current_index(&worktrees, &cwd)
+        .map(|index| &worktrees[index])
+        .ok_or_else(|| anyhow::anyhow!("not inside a worktree"))?;
+    let target = target(&settings, main, &args.name)?;
+    w3::add(
+        &cwd,
+        &target,
+        w3::Branch::New(&args.name),
+        Some(&source.head),
+    )?;
+    if let Err(error) = carry(&source.path, &main.path, &target, &settings.add_include) {
+        let rollback = w3::remove(&cwd, &target).and_then(|()| w3::delete_branch(&cwd, &args.name));
+        return Err(match rollback {
+            Ok(()) => error,
+            Err(failure) => error.context(format!("rollback failed: {failure}")),
+        });
+    }
+    println!("{}", target.display());
+    Ok(())
+}
+
+fn carry(source: &Path, main: &Path, target: &Path, include: &str) -> anyhow::Result<()> {
+    let staged = w3::changes(source, w3::Changes::Staged)?;
+    w3::apply(target, &staged, w3::Apply::Index)?;
+    let unstaged = w3::changes(source, w3::Changes::Unstaged)?;
+    w3::apply(target, &unstaged, w3::Apply::WorkingTree)?;
+    copy_from(source, target, &w3::untracked_files(source)?)?;
+    if !include.is_empty() {
+        let files = w3::included_files(source, &main.join(include))?;
+        copy_from(source, target, &files)?;
+    }
+    Ok(())
+}
+
+fn main_checkout(worktrees: &[w3::Worktree]) -> anyhow::Result<&w3::Worktree> {
+    let main = worktrees
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("no worktree found"))?;
+    if main.bare {
+        anyhow::bail!("the main checkout is bare, there is nothing to copy from");
+    }
+    Ok(main)
+}
+
+fn target(settings: &Settings, main: &w3::Worktree, name: &str) -> anyhow::Result<PathBuf> {
+    let repo = add::directory_name(&main.path.file_name().unwrap_or_default().to_string_lossy())
+        .map_err(anyhow::Error::msg)?;
+    let directory = add::directory_name(name).map_err(anyhow::Error::msg)?;
+    let home = std::env::home_dir();
+    let target = add::target_path(&settings.add_path, home.as_deref(), &repo, &directory)
+        .map_err(anyhow::Error::msg)?;
+    if target.exists() {
+        anyhow::bail!("{} exists", target.display());
+    }
+    Ok(target)
+}
+
+fn copy_from(source: &Path, target: &Path, files: &[PathBuf]) -> anyhow::Result<()> {
+    let copied = add::copy_included(source, target, files).map_err(anyhow::Error::msg)?;
+    for file in &copied.copied {
+        eprintln!("copied {}", file.display());
+    }
+    for file in &copied.skipped {
+        eprintln!("skipped {}: not a regular file", file.display());
+    }
     Ok(())
 }
 

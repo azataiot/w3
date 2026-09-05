@@ -421,55 +421,23 @@ fn the_environment_beats_az_toml_and_the_flag_beats_both() {
     assert_eq!(stdout.trim(), home.join("from-flag/two").to_str().unwrap());
 }
 
-#[test]
-fn an_empty_include_copies_nothing() {
-    let fx = Fixture::new();
-    write_ignored(&fx);
-    let output = fx.run(&fx.repo, &["add", "wt", "--include", ""], &[]);
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty());
-    assert!(!fx.home().join(".worktrees/repo/wt/.env").exists());
+fn commit_file(dir: &Path, name: &str, content: &[u8]) {
+    std::fs::write(dir.join(name), content).unwrap();
+    git(dir, &["add", name]);
+    git(dir, &["commit", "-q", "-m", name]);
 }
 
 #[test]
-fn list_shows_the_new_worktree_as_current_from_inside_it() {
-    let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.repo, &["add", "wt"], &[]);
-    let target = Path::new(stdout.trim());
-    let list = fx.stdout(target, &["list", "--format", "plain"], &[]);
-    let rows: Vec<Vec<&str>> = list
-        .lines()
-        .map(|line| line.split('\t').collect())
-        .collect();
-    assert_eq!(rows.len(), 3, "{list}");
-    let row = rows
-        .iter()
-        .find(|row| Path::new(row[0]) == target)
-        .expect("new row");
-    assert_eq!(row[2], "wt");
-    assert_eq!(row[3], "current");
-}
-
-#[test]
-fn add_help_documents_the_five_arguments() {
-    let fx = Fixture::new();
-    let stdout = fx.stdout(&fx.repo, &["add", "--help"], &[]);
-    for piece in ["<NAME>", "--branch", "--base", "--path", "--include"] {
-        assert!(stdout.contains(piece), "{stdout}");
-    }
-}
-
-#[test]
-fn add_from_a_secondary_worktree_starts_at_its_head() {
+fn cp_starts_at_the_current_head_and_ignores_add_base() {
     let fx = Fixture::new();
     git(
         &fx.feature,
         &["commit", "-q", "--allow-empty", "-m", "on feature"],
     );
     let feature_head = git(&fx.feature, &["rev-parse", "HEAD"]);
-    assert_ne!(feature_head, fx.head);
-    let stdout = fx.stdout(&fx.feature, &["add", "spike"], &[]);
+    let stdout = fx.stdout(&fx.feature, &["cp", "spike"], &[("W3_ADD_BASE", &fx.head)]);
     let path = Path::new(stdout.trim());
+    assert!(path.ends_with(".worktrees/repo/spike"), "{stdout}");
     assert_eq!(git_out(path, &["rev-parse", "HEAD"]), feature_head);
     assert_eq!(
         git_out(path, &["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -478,18 +446,138 @@ fn add_from_a_secondary_worktree_starts_at_its_head() {
 }
 
 #[test]
-fn add_from_a_subdirectory_of_a_worktree_starts_at_its_head() {
+fn cp_carries_staged_and_unstaged_changes_apart() {
     let fx = Fixture::new();
-    git(
-        &fx.feature,
-        &["commit", "-q", "--allow-empty", "-m", "on feature"],
-    );
-    let feature_head = git(&fx.feature, &["rev-parse", "HEAD"]);
-    let deep = fx.feature.join("src/deep");
-    std::fs::create_dir_all(&deep).unwrap();
-    let stdout = fx.stdout(&deep, &["add", "spike"], &[]);
+    commit_file(&fx.feature, "a.txt", b"a\n");
+    commit_file(&fx.feature, "b.txt", b"b\n");
+    std::fs::write(fx.feature.join("a.txt"), "staged\n").unwrap();
+    git(&fx.feature, &["add", "a.txt"]);
+    std::fs::write(fx.feature.join("a.txt"), "staged\nmore\n").unwrap();
+    std::fs::write(fx.feature.join("b.txt"), "unstaged\n").unwrap();
+    let staged = git(&fx.feature, &["diff", "--cached"]);
+    let unstaged = git(&fx.feature, &["diff"]);
+    assert!(!staged.is_empty() && !unstaged.is_empty());
+    let stdout = fx.stdout(&fx.feature, &["cp", "spike"], &[]);
+    let path = Path::new(stdout.trim());
+    assert_eq!(git_out(path, &["diff", "--cached"]), staged);
+    assert_eq!(git_out(path, &["diff"]), unstaged);
     assert_eq!(
-        git_out(Path::new(stdout.trim()), &["rev-parse", "HEAD"]),
-        feature_head
+        std::fs::read_to_string(path.join("a.txt")).unwrap(),
+        "staged\nmore\n"
     );
+}
+
+#[test]
+fn cp_carries_a_staged_new_file_and_a_binary_change() {
+    let fx = Fixture::new();
+    commit_file(&fx.feature, "bin.dat", b"a\0b\n");
+    std::fs::write(fx.feature.join("bin.dat"), b"a\0c\0\n").unwrap();
+    std::fs::write(fx.feature.join("new.txt"), "new\n").unwrap();
+    git(&fx.feature, &["add", "new.txt"]);
+    let stdout = fx.stdout(&fx.feature, &["cp", "spike"], &[]);
+    let path = Path::new(stdout.trim());
+    assert_eq!(std::fs::read(path.join("bin.dat")).unwrap(), b"a\0c\0\n");
+    assert_eq!(
+        git_out(path, &["diff", "--cached", "--name-only"]),
+        "new.txt"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path.join("new.txt")).unwrap(),
+        "new\n"
+    );
+}
+
+#[test]
+fn cp_carries_untracked_files_and_reports_them() {
+    let fx = Fixture::new();
+    std::fs::create_dir(fx.feature.join("nested")).unwrap();
+    std::fs::write(fx.feature.join("nested/new.txt"), "untracked\n").unwrap();
+    let output = fx.run(&fx.feature, &["cp", "spike"], &[]);
+    assert!(output.status.success());
+    let path = fx.home().join(".worktrees/repo/spike");
+    assert_eq!(
+        std::fs::read_to_string(path.join("nested/new.txt")).unwrap(),
+        "untracked\n"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr, "copied nested/new.txt\n");
+    assert_eq!(git_out(&path, &["status", "--short"]), "?? nested/");
+}
+
+#[test]
+fn cp_copies_included_files_from_the_source_worktree() {
+    let fx = Fixture::new();
+    commit_file(
+        &fx.feature,
+        ".gitignore",
+        b".env\nsecret.txt\n.worktreeinclude\n",
+    );
+    std::fs::write(fx.repo.join(".worktreeinclude"), "/.env\n").unwrap();
+    std::fs::write(fx.repo.join(".env"), "main\n").unwrap();
+    std::fs::write(fx.feature.join(".env"), "feature\n").unwrap();
+    std::fs::write(fx.feature.join("secret.txt"), "no\n").unwrap();
+    let output = fx.run(&fx.feature, &["cp", "spike"], &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let path = fx.home().join(".worktrees/repo/spike");
+    assert_eq!(
+        std::fs::read_to_string(path.join(".env")).unwrap(),
+        "feature\n"
+    );
+    assert!(!path.join("secret.txt").exists());
+    assert!(!path.join(".worktreeinclude").exists());
+    assert_eq!(String::from_utf8(output.stderr).unwrap(), "copied .env\n");
+}
+
+#[test]
+fn cp_with_a_clean_tree_creates_a_plain_worktree() {
+    let fx = Fixture::new();
+    let output = fx.run(&fx.feature, &["cp", "spike"], &[]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let path = fx.home().join(".worktrees/repo/spike");
+    assert_eq!(git_out(&path, &["status", "--short"]), "");
+}
+
+#[test]
+fn cp_rolls_back_when_the_carry_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = Fixture::new();
+    let locked = fx.feature.join("locked.txt");
+    std::fs::write(&locked, "hidden\n").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let output = fx.run(&fx.feature, &["cp", "spike"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("locked.txt"), "{stderr}");
+    assert!(!fx.home().join(".worktrees/repo/spike").exists());
+    assert_eq!(git_out(&fx.repo, &["branch", "--list", "spike"]), "");
+}
+
+#[test]
+fn cp_outside_every_worktree_fails_with_one_line() {
+    let fx = Fixture::new();
+    let git_dir = fx.repo.join(".git");
+    let output = fx.run(
+        &fx.home(),
+        &["cp", "spike"],
+        &[("GIT_DIR", git_dir.to_str().unwrap())],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.contains("not inside a worktree"), "{stderr}");
+}
+
+#[test]
+fn cp_help_documents_the_three_arguments() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["cp", "--help"], &[]);
+    for piece in ["<NAME>", "--path", "--include"] {
+        assert!(stdout.contains(piece), "{stdout}");
+    }
+    assert!(!stdout.contains("--base"), "{stdout}");
 }

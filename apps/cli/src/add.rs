@@ -48,14 +48,14 @@ pub fn target_path(
     Ok(PathBuf::from(out))
 }
 
-pub fn copy_included(main: &Path, target: &Path, files: &[PathBuf]) -> Result<Copied, String> {
+pub fn copy_included(source: &Path, target: &Path, files: &[PathBuf]) -> Result<Copied, String> {
     let mut result = Copied {
         copied: Vec::new(),
         skipped: Vec::new(),
     };
     for file in files {
-        let source = main.join(file);
-        let is_regular = std::fs::metadata(&source)
+        let origin = source.join(file);
+        let is_regular = std::fs::metadata(&origin)
             .map(|metadata| metadata.is_file())
             .map_err(|error| format!("{}: {error}", file.display()))?;
         if !is_regular {
@@ -67,7 +67,7 @@ pub fn copy_included(main: &Path, target: &Path, files: &[PathBuf]) -> Result<Co
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("{}: {error}", file.display()))?;
         }
-        std::fs::copy(&source, &destination)
+        std::fs::copy(&origin, &destination)
             .map_err(|error| format!("{}: {error}", file.display()))?;
         result.copied.push(file.clone());
     }
