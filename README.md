@@ -39,8 +39,56 @@ cargo install --git https://github.com/azataiot/w3 w3-cli
 w3 list
 ```
 
-One line per worktree: path, short HEAD, branch or `(detached)`, and `locked`
-or `prunable` when set.
+On a terminal, a table. A `*` marks the worktree you are in:
+
+```text
+  NAME      BRANCH   HEAD      STATE   PATH
+* w3        main     1a2b3c4d          ~/Developer/w3
+  feature   feature  5e6f7a8b  locked  ~/.worktrees/w3/feature
+```
+
+In a pipe, one worktree per line, tab-separated, absolute paths, no header.
+The columns are path, head, branch, state:
+
+```sh
+cd "$(w3 list | fzf | cut -f1)"
+```
+
+For an agent or a script, JSON with the full SHA:
+
+```sh
+w3 list --format json
+```
+
+Flags override everything: `--format table|plain|json`, `--head-length N`,
+`--columns name,branch,head,state,path`, `--fields path,head,branch,bare,locked,prunable,current`.
+
+### Configure
+
+Defaults come from, in rising precedence: `~/.config/w3/config.toml` (or
+`$XDG_CONFIG_HOME/w3/config.toml`), a `[w3]` table in the repo `az.toml`, the
+variables `W3_FORMAT`, `W3_HEAD_LENGTH`, `W3_COLUMNS`, `W3_FIELDS`, then the
+flags. Every key is optional. The full shape, with the built-in defaults:
+
+```toml
+head_length = 8
+
+[format]
+tty = "table"
+pipe = "plain"
+
+[table]
+columns = ["name", "branch", "head", "state", "path"]
+
+[plain]
+columns = ["path", "head", "branch", "state"]
+
+[json]
+fields = ["path", "head", "branch", "bare", "locked", "prunable", "current"]
+```
+
+In `az.toml` the same keys sit under `[w3]`, `[w3.format]`, `[w3.table]`,
+`[w3.plain]`, and `[w3.json]`.
 
 ## Layout
 
