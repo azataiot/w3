@@ -1,5 +1,14 @@
+use std::io::IsTerminal;
+
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+
+mod config;
+mod current;
+mod render;
+
+use config::{Format, Layer, Settings};
+use render::{Column, Field, Row, parse_list};
 
 #[derive(Parser)]
 #[command(name = "w3", version, about)]
@@ -11,128 +20,110 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     #[command(about = "List the worktrees of the current repository")]
-    List,
+    List(ListArgs),
+}
+
+#[derive(clap::Args)]
+struct ListArgs {
+    #[arg(
+        long,
+        value_name = "table|plain|json",
+        help = "Output mode, default table on a terminal and plain in a pipe"
+    )]
+    format: Option<Format>,
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=40), help = "SHA characters in table and plain output, default 8")]
+    head_length: Option<u8>,
+    #[arg(
+        long,
+        value_name = "LIST",
+        help = "Columns for table and plain output, comma-separated: name, branch, head, state, path"
+    )]
+    columns: Option<String>,
+    #[arg(
+        long,
+        value_name = "LIST",
+        help = "Fields for json output, comma-separated: path, head, branch, bare, locked, prunable, current"
+    )]
+    fields: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::List => list(),
+        Command::List(args) => list(args),
     }
 }
 
-fn list() -> anyhow::Result<()> {
+fn list(args: ListArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
+    let settings = settings(&args, &cwd).map_err(anyhow::Error::msg)?;
     let worktrees = w3::list(&cwd)?;
-    let width = path_width(&worktrees);
-    for worktree in &worktrees {
-        println!("{}", render(worktree, width));
-    }
+    let current = current::current_index(&worktrees, &cwd);
+    let rows: Vec<Row> = worktrees
+        .iter()
+        .enumerate()
+        .map(|(index, worktree)| Row {
+            worktree,
+            current: Some(index) == current,
+        })
+        .collect();
+    let mode = settings.mode(std::io::stdout().is_terminal());
+    let output = match mode {
+        Format::Table => {
+            let home = std::env::home_dir();
+            render::table(
+                &rows,
+                settings.columns_for(mode),
+                settings.head_length,
+                home.as_deref(),
+            )
+        }
+        Format::Plain => render::plain(&rows, settings.columns_for(mode), settings.head_length),
+        Format::Json => render::json(&rows, &settings.fields),
+    };
+    print!("{output}");
     Ok(())
 }
 
-fn path_width(worktrees: &[w3::Worktree]) -> usize {
-    worktrees
-        .iter()
-        .map(|worktree| worktree.path.to_string_lossy().chars().count())
-        .max()
-        .unwrap_or(0)
-}
-
-fn render(worktree: &w3::Worktree, width: usize) -> String {
-    let head: String = worktree.head.chars().take(8).collect();
-    let branch = match &worktree.branch {
-        Some(name) => format!("[{name}]"),
-        None => "(detached)".to_string(),
+fn settings(args: &ListArgs, cwd: &std::path::Path) -> Result<Settings, String> {
+    let user = config::user_file(
+        std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+        std::env::home_dir().as_deref(),
+    )
+    .map(|path| config::load_user_file(&path))
+    .transpose()?
+    .unwrap_or_default();
+    let repo = config::repo_file(cwd)
+        .map(|path| config::load_repo_file(&path))
+        .transpose()?
+        .unwrap_or_default();
+    let env = config::from_env(|name| std::env::var(name).ok())?;
+    let flags = Layer {
+        format: args.format,
+        head_length: args.head_length.map(usize::from),
+        columns: args
+            .columns
+            .as_deref()
+            .map(|text| parse_list::<Column>(text).map_err(|error| format!("--columns: {error}")))
+            .transpose()?,
+        fields: args
+            .fields
+            .as_deref()
+            .map(|text| parse_list::<Field>(text).map_err(|error| format!("--fields: {error}")))
+            .transpose()?,
+        ..Layer::default()
     };
-    let mut line = format!(
-        "{:<width$}  {head} {branch}",
-        worktree.path.to_string_lossy()
-    );
-    if worktree.bare {
-        line.push_str(" bare");
-    }
-    if worktree.locked.is_some() {
-        line.push_str(" locked");
-    }
-    if worktree.prunable.is_some() {
-        line.push_str(" prunable");
-    }
-    line
+    Ok(config::resolve(&[user, repo, env, flags]))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use clap::CommandFactory;
 
     use super::*;
 
-    const HEAD: &str = "14b96db3c138a070d35201b350cba339eedd99f2";
-
-    fn worktree(path: &str, branch: Option<&str>) -> w3::Worktree {
-        w3::Worktree {
-            path: PathBuf::from(path),
-            head: HEAD.into(),
-            branch: branch.map(Into::into),
-            locked: None,
-            prunable: None,
-            bare: false,
-        }
-    }
-
     #[test]
     fn clap_definition_is_valid() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn renders_path_short_head_and_branch() {
-        assert_eq!(
-            render(&worktree("/repo", Some("main")), 5),
-            "/repo  14b96db3 [main]"
-        );
-    }
-
-    #[test]
-    fn renders_detached_head() {
-        assert_eq!(
-            render(&worktree("/repo", None), 5),
-            "/repo  14b96db3 (detached)"
-        );
-    }
-
-    #[test]
-    fn pads_path_to_column_width() {
-        assert_eq!(
-            render(&worktree("/a", Some("main")), 6),
-            "/a      14b96db3 [main]"
-        );
-    }
-
-    #[test]
-    fn appends_state_flags() {
-        let mut locked = worktree("/repo", Some("main"));
-        locked.bare = true;
-        locked.locked = Some(String::new());
-        locked.prunable = Some("gitdir file points to non-existent location".into());
-        assert_eq!(
-            render(&locked, 5),
-            "/repo  14b96db3 [main] bare locked prunable"
-        );
-    }
-
-    #[test]
-    fn column_width_counts_characters_not_bytes() {
-        let worktrees = [worktree("/äöü", Some("main")), worktree("/ab", Some("dev"))];
-        let width = path_width(&worktrees);
-        assert_eq!(width, 4);
-        assert_eq!(render(&worktrees[1], width), "/ab   14b96db3 [dev]");
-    }
-
-    #[test]
-    fn empty_list_has_zero_width() {
-        assert_eq!(path_width(&[]), 0);
     }
 }
