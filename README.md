@@ -122,15 +122,16 @@ columns = ["path", "head", "branch", "state"]
 [json]
 fields = ["path", "head", "branch", "bare", "locked", "prunable", "current"]
 
-[add]
+[worktree]
 path = "~/.worktrees/{repo}/{name}"
 include = ".worktreeinclude"
 ```
 
-`add.base` names a default base ref and is unset by default, meaning `HEAD`.
-The variables are `W3_ADD_PATH`, `W3_ADD_INCLUDE`, and `W3_ADD_BASE`. In
-`az.toml` the same keys sit under `[w3]`, `[w3.format]`, `[w3.table]`,
-`[w3.plain]`, `[w3.json]`, and `[w3.add]`.
+`[worktree]` applies to `w3 add` and `w3 cp`. `add.base` names a default base
+ref for `w3 add` and is unset by default, meaning `HEAD`. The variables are
+`W3_WORKTREE_PATH`, `W3_WORKTREE_INCLUDE`, and `W3_ADD_BASE`. In `az.toml` the
+same keys sit under `[w3]`, `[w3.format]`, `[w3.table]`, `[w3.plain]`,
+`[w3.json]`, `[w3.worktree]`, and `[w3.add]`.
 
 ## Layout
 

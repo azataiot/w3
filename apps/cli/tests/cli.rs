@@ -406,19 +406,127 @@ fn the_environment_beats_az_toml_and_the_flag_beats_both() {
     let fx = Fixture::new();
     let home = fx.home();
     fx.write_az_toml(&format!(
-        "[w3.add]\npath = \"{}/from-file/{{name}}\"\n",
+        "[w3.worktree]\npath = \"{}/from-file/{{name}}\"\n",
         home.display()
     ));
     let env_template = format!("{}/from-env/{{name}}", home.display());
-    let stdout = fx.stdout(&fx.repo, &["add", "one"], &[("W3_ADD_PATH", &env_template)]);
+    let stdout = fx.stdout(
+        &fx.repo,
+        &["add", "one"],
+        &[("W3_WORKTREE_PATH", &env_template)],
+    );
     assert_eq!(stdout.trim(), home.join("from-env/one").to_str().unwrap());
     let flag_template = format!("{}/from-flag/{{name}}", home.display());
     let stdout = fx.stdout(
         &fx.repo,
         &["add", "two", "--path", &flag_template],
-        &[("W3_ADD_PATH", &env_template)],
+        &[("W3_WORKTREE_PATH", &env_template)],
     );
     assert_eq!(stdout.trim(), home.join("from-flag/two").to_str().unwrap());
+}
+
+#[test]
+fn the_worktree_table_sets_the_path_for_cp_too() {
+    let fx = Fixture::new();
+    let home = fx.home();
+    std::fs::write(
+        fx.feature.join("az.toml"),
+        format!(
+            "[w3.worktree]\npath = \"{}/from-file/{{name}}\"\ninclude = \"\"\n",
+            home.display()
+        ),
+    )
+    .unwrap();
+    let stdout = fx.stdout(&fx.feature, &["cp", "spike"], &[]);
+    assert_eq!(
+        stdout.trim(),
+        home.join("from-file/spike").to_str().unwrap()
+    );
+}
+
+#[test]
+fn a_path_under_the_add_table_is_rejected_naming_the_file() {
+    let fx = Fixture::new();
+    fx.write_az_toml("[w3.add]\npath = \"/tmp/{name}\"\n");
+    let output = fx.run(&fx.repo, &["add", "wt"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("az.toml"), "{stderr}");
+    assert!(stderr.contains("path"), "{stderr}");
+    assert!(!fx.home().join(".worktrees").exists());
+}
+
+#[test]
+fn an_empty_include_copies_nothing() {
+    let fx = Fixture::new();
+    write_ignored(&fx);
+    let output = fx.run(&fx.repo, &["add", "wt", "--include", ""], &[]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(!fx.home().join(".worktrees/repo/wt/.env").exists());
+}
+
+#[test]
+fn list_shows_the_new_worktree_as_current_from_inside_it() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["add", "wt"], &[]);
+    let target = Path::new(stdout.trim());
+    let list = fx.stdout(target, &["list", "--format", "plain"], &[]);
+    let rows: Vec<Vec<&str>> = list
+        .lines()
+        .map(|line| line.split('\t').collect())
+        .collect();
+    assert_eq!(rows.len(), 3, "{list}");
+    let row = rows
+        .iter()
+        .find(|row| Path::new(row[0]) == target)
+        .expect("new row");
+    assert_eq!(row[2], "wt");
+    assert_eq!(row[3], "current");
+}
+
+#[test]
+fn add_help_documents_the_five_arguments() {
+    let fx = Fixture::new();
+    let stdout = fx.stdout(&fx.repo, &["add", "--help"], &[]);
+    for piece in ["<NAME>", "--branch", "--base", "--path", "--include"] {
+        assert!(stdout.contains(piece), "{stdout}");
+    }
+}
+
+#[test]
+fn add_from_a_secondary_worktree_starts_at_its_head() {
+    let fx = Fixture::new();
+    git(
+        &fx.feature,
+        &["commit", "-q", "--allow-empty", "-m", "on feature"],
+    );
+    let feature_head = git(&fx.feature, &["rev-parse", "HEAD"]);
+    assert_ne!(feature_head, fx.head);
+    let stdout = fx.stdout(&fx.feature, &["add", "spike"], &[]);
+    let path = Path::new(stdout.trim());
+    assert_eq!(git_out(path, &["rev-parse", "HEAD"]), feature_head);
+    assert_eq!(
+        git_out(path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "spike"
+    );
+}
+
+#[test]
+fn add_from_a_subdirectory_of_a_worktree_starts_at_its_head() {
+    let fx = Fixture::new();
+    git(
+        &fx.feature,
+        &["commit", "-q", "--allow-empty", "-m", "on feature"],
+    );
+    let feature_head = git(&fx.feature, &["rev-parse", "HEAD"]);
+    let deep = fx.feature.join("src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+    let stdout = fx.stdout(&deep, &["add", "spike"], &[]);
+    assert_eq!(
+        git_out(Path::new(stdout.trim()), &["rev-parse", "HEAD"]),
+        feature_head
+    );
 }
 
 fn commit_file(dir: &Path, name: &str, content: &[u8]) {

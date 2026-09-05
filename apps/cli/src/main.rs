@@ -166,8 +166,8 @@ fn list(args: ListArgs) -> anyhow::Result<()> {
 fn add(args: AddArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let flags = Layer {
-        add_path: args.path,
-        add_include: args.include,
+        worktree_path: args.path,
+        worktree_include: args.include,
         add_base: args.base,
         ..Layer::default()
     };
@@ -180,8 +180,8 @@ fn add(args: AddArgs) -> anyhow::Result<()> {
         None => w3::Branch::New(&args.name),
     };
     w3::add(&cwd, &target, branch, settings.add_base.as_deref())?;
-    if !settings.add_include.is_empty() {
-        let files = w3::included_files(&main.path, Path::new(&settings.add_include))?;
+    if !settings.worktree_include.is_empty() {
+        let files = w3::included_files(&main.path, Path::new(&settings.worktree_include))?;
         copy_from(&main.path, &target, &files)?;
     }
     println!("{}", target.display());
@@ -191,8 +191,8 @@ fn add(args: AddArgs) -> anyhow::Result<()> {
 fn cp(args: CpArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let flags = Layer {
-        add_path: args.path,
-        add_include: args.include,
+        worktree_path: args.path,
+        worktree_include: args.include,
         ..Layer::default()
     };
     let settings = settings(flags, &cwd).map_err(anyhow::Error::msg)?;
@@ -208,7 +208,12 @@ fn cp(args: CpArgs) -> anyhow::Result<()> {
         w3::Branch::New(&args.name),
         Some(&source.head),
     )?;
-    if let Err(error) = carry(&source.path, &main.path, &target, &settings.add_include) {
+    if let Err(error) = carry(
+        &source.path,
+        &main.path,
+        &target,
+        &settings.worktree_include,
+    ) {
         let rollback = w3::remove(&cwd, &target).and_then(|()| w3::delete_branch(&cwd, &args.name));
         return Err(match rollback {
             Ok(()) => error,
@@ -247,7 +252,7 @@ fn target(settings: &Settings, main: &w3::Worktree, name: &str) -> anyhow::Resul
         .map_err(anyhow::Error::msg)?;
     let directory = add::directory_name(name).map_err(anyhow::Error::msg)?;
     let home = std::env::home_dir();
-    let target = add::target_path(&settings.add_path, home.as_deref(), &repo, &directory)
+    let target = add::target_path(&settings.worktree_path, home.as_deref(), &repo, &directory)
         .map_err(anyhow::Error::msg)?;
     if target.exists() {
         anyhow::bail!("{} exists", target.display());
