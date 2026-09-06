@@ -932,6 +932,21 @@ fn init_rejects_an_unknown_shell() {
     assert_eq!(output.status.code(), Some(2));
 }
 
+fn installed_shells() -> Vec<&'static str> {
+    ["zsh", "bash"]
+        .into_iter()
+        .filter(
+            |name| match Command::new(name).arg("-c").arg("true").output() {
+                Ok(_) => true,
+                Err(_) => {
+                    eprintln!("skipped: {name} not installed");
+                    false
+                }
+            },
+        )
+        .collect()
+}
+
 fn shell(fx: &Fixture, shell: &str, script: &str) -> Output {
     let home = fx.home();
     Command::new(shell)
@@ -959,7 +974,7 @@ fn shell_lines(fx: &Fixture, name: &str, commands: &str) -> (Vec<String>, String
 #[test]
 fn the_shell_function_changes_directory_on_one_match() {
     let fx = Fixture::new();
-    for name in ["zsh", "bash"] {
+    for name in installed_shells() {
         let (lines, stderr) = shell_lines(&fx, name, "w3 cd feature; pwd");
         assert_eq!(lines, [fx.feature.to_str().unwrap()], "{name}: {stderr}");
         assert!(stderr.is_empty(), "{name}: {stderr}");
@@ -969,7 +984,7 @@ fn the_shell_function_changes_directory_on_one_match() {
 #[test]
 fn the_shell_function_stays_put_on_no_match() {
     let fx = Fixture::new();
-    for name in ["zsh", "bash"] {
+    for name in installed_shells() {
         let (lines, stderr) = shell_lines(&fx, name, "w3 cd nope; echo \"status $?\"; pwd");
         assert_eq!(lines, ["status 1", fx.repo.to_str().unwrap()], "{name}");
         assert_eq!(stderr, "Error: no worktree matches nope\n", "{name}");
@@ -979,7 +994,7 @@ fn the_shell_function_stays_put_on_no_match() {
 #[test]
 fn the_shell_function_prints_help_instead_of_moving() {
     let fx = Fixture::new();
-    for name in ["zsh", "bash"] {
+    for name in installed_shells() {
         let (lines, _) = shell_lines(&fx, name, "w3 cd --help; pwd");
         assert!(
             lines.iter().any(|line| line.contains("[PATTERN]")),
@@ -992,7 +1007,7 @@ fn the_shell_function_prints_help_instead_of_moving() {
 #[test]
 fn the_shell_function_passes_other_commands_through() {
     let fx = Fixture::new();
-    for name in ["zsh", "bash"] {
+    for name in installed_shells() {
         let (lines, _) = shell_lines(&fx, name, "w3 list | cut -f1");
         assert_eq!(
             lines,
