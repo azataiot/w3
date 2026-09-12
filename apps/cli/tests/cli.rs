@@ -148,8 +148,9 @@ fn json_has_the_seven_fields_in_order_with_the_full_sha() {
     let fx = Fixture::new();
     let stdout = fx.stdout(&fx.repo, &["list", "--format", "json"], &[]);
     assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let rows: Vec<serde_json::Map<String, serde_json::Value>> =
-        serde_json::from_str(&stdout).unwrap();
+        serde_json::from_value(envelope["data"]["worktrees"].clone()).unwrap();
     assert_eq!(rows.len(), 2);
     let keys: Vec<&str> = rows[0].keys().map(String::as_str).collect();
     assert_eq!(
@@ -192,7 +193,8 @@ fn the_environment_wins_over_both_files() {
     fx.write_user_config("[format]\npipe = \"plain\"\n");
     fx.write_az_toml("[w3.format]\npipe = \"plain\"\n");
     let stdout = fx.stdout(&fx.repo, &["list"], &[("W3_FORMAT", "json")]);
-    assert!(stdout.starts_with('['), "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(value["data"]["worktrees"].is_array(), "{stdout}");
 }
 
 #[test]
@@ -362,6 +364,449 @@ fn add_copies_included_files_and_skips_the_rest() {
 }
 
 #[test]
+fn json_reports_copy_progress_and_rollback_state() {
+    let fx = Fixture::new();
+    std::fs::write(fx.repo.join(".gitignore"), "a-good\nz-broken\n").unwrap();
+    std::fs::write(fx.repo.join(".worktreeinclude"), "a-good\nz-broken\n").unwrap();
+    std::fs::write(fx.repo.join("a-good"), "copy\n").unwrap();
+    std::os::unix::fs::symlink("missing", fx.repo.join("z-broken")).unwrap();
+    for command in ["add", "cp"] {
+        let output = fx.run(&fx.repo, &[command, "failed", "--format", "json"], &[]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], "copy_failed", "{value}");
+        assert!(
+            value["data"]["copied"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("a-good"))
+        );
+        assert_eq!(
+            value["data"]["rollback"],
+            serde_json::json!({
+                "ok": true, "worktree_removed": true, "branch_deleted": true,
+            })
+        );
+        assert!(!fx.home().join(".worktrees/repo/failed").exists());
+    }
+}
+
+#[test]
+fn rollback_failure_reports_both_errors_and_keeps_the_branch() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = Fixture::new();
+    std::fs::write(fx.repo.join(".gitignore"), "broken\n").unwrap();
+    std::fs::write(fx.repo.join(".worktreeinclude"), "broken\n").unwrap();
+    std::os::unix::fs::symlink("missing", fx.repo.join("broken")).unwrap();
+    let hook = fx.repo.join(".git/hooks/post-checkout");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ngit worktree lock --reason test-lock \"$PWD\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = fx.run(&fx.repo, &["add", "failed", "--format=json"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "rollback_failed", "{value}");
+    assert!(
+        value["error"]["details"]["cause"]
+            .as_str()
+            .unwrap()
+            .contains("broken")
+    );
+    assert!(
+        value["error"]["details"]["cleanup_error"]
+            .as_str()
+            .unwrap()
+            .contains("locked")
+    );
+    assert_eq!(value["data"]["rollback"]["worktree_removed"], false);
+    assert!(fx.home().join(".worktrees/repo/failed").exists());
+    assert_eq!(git_out(&fx.repo, &["rev-parse", "failed"]), fx.head);
+}
+
+#[test]
+fn json_covers_configuration_validation_and_repository_errors() {
+    let fx = Fixture::new();
+    for (cwd, args, expected) in [
+        (
+            &fx.repo,
+            vec!["add", "release.1", "--format=json"],
+            "invalid_name",
+        ),
+        (
+            &fx.repo,
+            vec!["cp", "release.1", "--format=json"],
+            "invalid_name",
+        ),
+        (&fx.home(), vec!["list", "--format=json"], "git_error"),
+    ] {
+        let output = fx.run(cwd, &args, &[]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], expected, "{value}");
+    }
+    fx.write_user_config("not-valid-toml");
+    let output = fx.run(&fx.repo, &["list", "--format=json"], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "invalid_configuration", "{value}");
+}
+
+#[test]
+fn status_handles_diverged_detached_and_missing_worktrees() {
+    let fx = Fixture::new();
+    git(&fx.repo, &["branch", "--set-upstream-to=feature"]);
+    git(&fx.repo, &["commit", "-q", "--allow-empty", "-m", "main"]);
+    git(
+        &fx.feature,
+        &["commit", "-q", "--allow-empty", "-m", "feature"],
+    );
+    let status = w3::status(&fx.repo).unwrap();
+    assert_eq!((status.ahead, status.behind), (Some(1), Some(1)));
+    git(&fx.feature, &["checkout", "--detach", "-q"]);
+    let status = w3::status(&fx.feature).unwrap();
+    assert_eq!(
+        (status.upstream, status.ahead, status.behind),
+        (None, None, None)
+    );
+    git(
+        &fx.repo,
+        &["worktree", "unlock", fx.feature.to_str().unwrap()],
+    );
+    std::fs::remove_dir_all(&fx.feature).unwrap();
+    let stdout = fx.stdout(
+        &fx.repo,
+        &["list", "--fields", "path,status", "--format=json"],
+        &[],
+    );
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["data"]["worktrees"][1]["status"]["available"], false);
+    assert!(value["data"]["worktrees"][1]["status"]["dirty"].is_null());
+}
+
+#[test]
+fn remove_refuses_ignored_files_and_never_uses_regex() {
+    let fx = Fixture::new();
+    git(
+        &fx.repo,
+        &["worktree", "unlock", fx.feature.to_str().unwrap()],
+    );
+    std::fs::write(fx.feature.join(".gitignore"), ".env\n").unwrap();
+    git(&fx.feature, &["add", ".gitignore"]);
+    git(&fx.feature, &["commit", "-qm", "ignore"]);
+    std::fs::write(fx.feature.join(".env"), "keep\n").unwrap();
+    for (target, expected) in [
+        ("feat", "worktree_not_found"),
+        ("feature", "unsafe_removal"),
+    ] {
+        let output = fx.run(&fx.repo, &["remove", target, "--format=json"], &[]);
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], expected);
+        if target == "feature" {
+            assert_eq!(value["error"]["details"]["reason"], "ignored_files");
+        }
+        assert!(fx.feature.join(".env").exists());
+    }
+}
+
+#[test]
+fn json_shell_errors_survive_errexit() {
+    let fx = Fixture::new();
+    for name in installed_shells() {
+        let output = shell(
+            &fx,
+            name,
+            &format!("eval \"$('{W3}' init {name})\"; set -e; w3 cd nope --format=json"),
+        );
+        assert_eq!(output.status.code(), Some(1));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], "worktree_not_found");
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn json_shell_passthrough_preserves_results_and_directory() {
+    let fx = Fixture::new();
+    for name in installed_shells() {
+        for (pattern, ok) in [("feature", true), ("nope", false)] {
+            let (lines, stderr) = shell_lines(
+                &fx,
+                name,
+                &format!("w3 cd {pattern} --format json; echo \"exit $?\"; pwd"),
+            );
+            assert!(stderr.is_empty(), "{name}: {stderr}");
+            let value: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+            assert_eq!(value["ok"], ok);
+            assert_eq!(lines[1], if ok { "exit 0" } else { "exit 1" });
+            assert_eq!(lines[2], fx.repo.to_str().unwrap());
+        }
+    }
+}
+
+#[test]
+fn list_status_reports_dirty_files_and_upstream_divergence() {
+    let fx = Fixture::new();
+    std::fs::write(fx.repo.join("tracked"), "base\n").unwrap();
+    git(&fx.repo, &["add", "tracked"]);
+    git(&fx.repo, &["commit", "-qm", "base"]);
+    git(&fx.repo, &["branch", "upstream"]);
+    git(&fx.repo, &["branch", "--set-upstream-to=upstream"]);
+    git(&fx.repo, &["commit", "-q", "--allow-empty", "-m", "ahead"]);
+    git(&fx.repo, &["config", "status.aheadBehind", "false"]);
+    std::fs::write(fx.repo.join("tracked"), "staged\n").unwrap();
+    git(&fx.repo, &["add", "tracked"]);
+    std::fs::write(fx.repo.join("tracked"), "unstaged\n").unwrap();
+    std::fs::write(fx.repo.join("untracked"), "x\n").unwrap();
+    let stdout = fx.stdout(&fx.repo, &["list", "--status", "--format", "json"], &[]);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let status = &value["data"]["worktrees"][0]["status"];
+    for field in ["dirty", "staged", "unstaged", "untracked"] {
+        assert_eq!(status[field], true, "{value}");
+    }
+    assert_eq!(status["upstream"], "upstream");
+    assert_eq!(status["ahead"], 1);
+    assert_eq!(status["behind"], 0);
+    assert!(value["data"]["worktrees"][1]["status"]["upstream"].is_null());
+    assert!(value["data"]["worktrees"][1]["status"]["ahead"].is_null());
+    let plain = fx.stdout(&fx.repo, &["list", "--status"], &[]);
+    assert!(
+        plain.contains("dirty") && plain.contains("ahead=1"),
+        "{plain}"
+    );
+}
+
+#[test]
+fn remove_preserves_branches_and_refuses_unsafe_targets() {
+    let fx = Fixture::new();
+    for (target, reason) in [("repo", "main_worktree"), ("feature", "locked_worktree")] {
+        let output = fx.run(&fx.repo, &["remove", target, "--format", "json"], &[]);
+        assert_eq!(output.status.code(), Some(1));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], "unsafe_removal", "{value}");
+        assert_eq!(value["error"]["details"]["reason"], reason);
+    }
+    git(
+        &fx.repo,
+        &["worktree", "unlock", fx.feature.to_str().unwrap()],
+    );
+    let output = fx.run(&fx.feature, &["remove", "feature", "--format", "json"], &[]);
+    assert!(!output.status.success());
+    assert!(fx.feature.exists());
+    std::fs::write(fx.feature.join("notes"), "keep\n").unwrap();
+    let output = fx.run(&fx.repo, &["remove", "feature", "--format", "json"], &[]);
+    assert!(!output.status.success());
+    assert!(fx.feature.join("notes").exists());
+    std::fs::remove_file(fx.feature.join("notes")).unwrap();
+    let stdout = fx.stdout(&fx.repo, &["remove", "feature", "--format", "json"], &[]);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["command"], "remove");
+    assert_eq!(value["data"]["branch_deleted"], false);
+    assert_eq!(value["data"]["forced"], false);
+    assert!(!fx.feature.exists());
+    assert_eq!(git_out(&fx.repo, &["rev-parse", "feature"]), fx.head);
+}
+
+#[test]
+fn remove_force_discards_local_files_but_preserves_the_branch() {
+    let fx = Fixture::new();
+    git(
+        &fx.repo,
+        &["worktree", "unlock", fx.feature.to_str().unwrap()],
+    );
+    std::fs::write(fx.feature.join(".gitignore"), ".env\n").unwrap();
+    std::fs::write(fx.feature.join("tracked"), "base\n").unwrap();
+    git(&fx.feature, &["add", ".gitignore", "tracked"]);
+    git(&fx.feature, &["commit", "-qm", "base"]);
+    let head = git_out(&fx.feature, &["rev-parse", "HEAD"]);
+    std::fs::write(fx.feature.join("tracked"), "staged\n").unwrap();
+    git(&fx.feature, &["add", "tracked"]);
+    std::fs::write(fx.feature.join("tracked"), "unstaged\n").unwrap();
+    std::fs::write(fx.feature.join("untracked"), "discard\n").unwrap();
+    std::fs::write(fx.feature.join(".env"), "discard\n").unwrap();
+    assert!(
+        !fx.run(&fx.repo, &["remove", "feature"], &[])
+            .status
+            .success()
+    );
+    assert!(fx.feature.join(".env").exists());
+    let stdout = fx.stdout(
+        &fx.repo,
+        &["remove", "feature", "--force", "--format=json"],
+        &[],
+    );
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["data"]["forced"], true);
+    assert_eq!(value["data"]["branch_deleted"], false);
+    assert!(!fx.feature.exists());
+    assert_eq!(git_out(&fx.repo, &["rev-parse", "feature"]), head);
+    assert_eq!(git_out(&fx.repo, &["rev-parse", "HEAD"]), fx.head);
+}
+
+#[test]
+fn remove_force_does_not_bypass_worktree_protections() {
+    let fx = Fixture::new();
+    for (cwd, target, reason) in [
+        (&fx.repo, "repo", "main_worktree"),
+        (&fx.repo, "feature", "locked_worktree"),
+        (&fx.feature, "feature", "current_worktree"),
+    ] {
+        let output = fx.run(cwd, &["remove", target, "--force", "--format=json"], &[]);
+        assert_eq!(output.status.code(), Some(1));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], "unsafe_removal");
+        assert_eq!(value["error"]["details"]["reason"], reason);
+        assert!(fx.repo.exists() && fx.feature.exists());
+    }
+    git(
+        &fx.repo,
+        &["worktree", "unlock", fx.feature.to_str().unwrap()],
+    );
+    let nested = fx.feature.join("nested");
+    git(
+        &fx.repo,
+        &["worktree", "add", "-qb", "nested", nested.to_str().unwrap()],
+    );
+    let output = fx.run(
+        &fx.repo,
+        &["remove", "feature", "--force", "--format=json"],
+        &[],
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["details"]["reason"], "nested_worktree");
+    assert!(nested.exists());
+}
+
+#[test]
+fn remove_force_handles_ignored_only_files_and_plain_output() {
+    let fx = Fixture::new();
+    git(
+        &fx.repo,
+        &["worktree", "unlock", fx.feature.to_str().unwrap()],
+    );
+    std::fs::write(fx.feature.join(".gitignore"), ".env\n").unwrap();
+    git(&fx.feature, &["add", ".gitignore"]);
+    git(&fx.feature, &["commit", "-qm", "ignore"]);
+    std::fs::write(fx.feature.join(".env"), "discard\n").unwrap();
+    assert!(!w3::status(&fx.feature).unwrap().dirty());
+    let stdout = fx.stdout(&fx.repo, &["remove", "feature", "--force"], &[]);
+    assert_eq!(stdout.trim(), fx.feature.to_str().unwrap());
+    assert!(!fx.feature.exists());
+    assert!(!git_out(&fx.repo, &["branch", "--list", "feature"]).is_empty());
+}
+
+#[test]
+fn creation_commands_share_the_name_policy() {
+    for command in ["add", "cp"] {
+        let fx = Fixture::new();
+        let output = fx.run(&fx.repo, &[command, "release.1"], &[]);
+        assert_eq!(output.status.code(), Some(1), "{command}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("name must use"));
+        assert!(!fx.home().join(".worktrees").exists());
+    }
+}
+
+#[test]
+fn json_is_a_versioned_envelope_for_every_command() {
+    let fx = Fixture::new();
+    for args in [
+        vec!["list", "--format", "json"],
+        vec!["cd", "^feature$", "--format=json"],
+        vec!["init", "bash", "--format", "json"],
+        vec!["add", "json-add", "--format", "json"],
+        vec!["cp", "json-copy", "--format", "json"],
+    ] {
+        let output = fx.run(&fx.repo, &args, &[]);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["schema_version"], 1, "{value}");
+        assert_eq!(value["command"], args[0]);
+        assert_eq!(value["ok"], true);
+        assert!(value["data"].is_object());
+        assert!(value["error"].is_null());
+    }
+}
+
+#[test]
+fn json_reports_usage_errors_help_and_ambiguity_without_prompting() {
+    let fx = Fixture::new();
+    for (args, code, error) in [
+        (vec!["add", "--format", "json"], 2, "invalid_arguments"),
+        (vec!["cd", "--format", "json"], 1, "ambiguous_worktree"),
+        (
+            vec!["cd", "absent", "--format", "json"],
+            1,
+            "worktree_not_found",
+        ),
+    ] {
+        let output = fx.run(&fx.repo, &args, &[]);
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error"]["code"], error);
+        if error == "ambiguous_worktree" {
+            assert_eq!(
+                value["error"]["details"]["candidates"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+        }
+    }
+    for args in [
+        vec!["--format", "json", "--help"],
+        vec!["list", "--help", "--format=json"],
+        vec!["--version", "--format=json"],
+    ] {
+        let output = fx.run(&fx.repo, &args, &[]);
+        assert!(output.status.success(), "{output:?}");
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["ok"], true);
+    }
+}
+
+#[test]
+fn add_rolls_back_when_copying_fails() {
+    for existing in [false, true] {
+        let fx = Fixture::new();
+        std::fs::write(fx.repo.join(".gitignore"), "broken\n").unwrap();
+        std::fs::write(fx.repo.join(".worktreeinclude"), "broken\n").unwrap();
+        std::os::unix::fs::symlink("missing", fx.repo.join("broken")).unwrap();
+        if existing {
+            git(&fx.repo, &["branch", "existing"]);
+        }
+        let args = if existing {
+            vec!["add", "failed", "-b", "existing"]
+        } else {
+            vec!["add", "failed"]
+        };
+        for _ in 0..2 {
+            let output = fx.run(&fx.repo, &args, &[]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert!(stderr.contains("broken"), "{stderr}");
+            assert!(!fx.home().join(".worktrees/repo/failed").exists());
+            assert_eq!(git_out(&fx.repo, &["branch", "--list", "failed"]), "");
+            assert_eq!(w3::list(&fx.repo).unwrap().len(), 2);
+            assert_eq!(git_out(&fx.repo, &["rev-parse", "HEAD"]), fx.head);
+            assert!(fx.repo.join("broken").is_symlink());
+            if existing {
+                assert_eq!(git_out(&fx.repo, &["rev-parse", "existing"]), fx.head);
+            }
+        }
+    }
+}
+
+#[test]
 fn an_existing_directory_is_a_collision() {
     let fx = Fixture::new();
     fx.stdout(&fx.repo, &["add", "wt"], &[]);
@@ -371,6 +816,8 @@ fn an_existing_directory_is_a_collision() {
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
     assert!(stderr.starts_with("Error: "), "{stderr}");
     assert!(stderr.contains("exists"), "{stderr}");
+    assert_eq!(git_out(&fx.repo, &["rev-parse", "wt"]), fx.head);
+    assert!(fx.home().join(".worktrees/repo/wt").exists());
 }
 
 #[test]
@@ -384,6 +831,7 @@ fn an_existing_branch_without_b_is_a_collision() {
     assert!(stderr.starts_with("Error: "), "{stderr}");
     assert!(stderr.contains("taken"), "{stderr}");
     assert!(!fx.home().join(".worktrees/repo/taken").exists());
+    assert_eq!(git_out(&fx.repo, &["rev-parse", "taken"]), fx.head);
 }
 
 #[test]
@@ -734,7 +1182,8 @@ fn a_pattern_matches_on_the_branch_when_the_name_differs() {
 fn json_returns_only_the_matches() {
     let fx = Fixture::new();
     let stdout = fx.stdout(&fx.repo, &["list", "feat", "--format", "json"], &[]);
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&stdout).unwrap();
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let rows = envelope["data"]["worktrees"].as_array().unwrap();
     assert_eq!(rows.len(), 1, "{stdout}");
     assert_eq!(rows[0]["branch"], "feature");
 }
@@ -749,7 +1198,8 @@ fn no_match_is_exit_0_with_empty_output() {
     let table = fx.stdout(&fx.repo, &["list", "zzz", "--format", "table"], &[]);
     assert_eq!(table, "");
     let json = fx.stdout(&fx.repo, &["list", "zzz", "--format", "json"], &[]);
-    assert_eq!(json, "[]\n");
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["data"]["worktrees"], serde_json::json!([]));
 }
 
 #[test]

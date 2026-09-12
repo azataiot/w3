@@ -23,11 +23,13 @@ pub enum Field {
     Locked,
     Prunable,
     Current,
+    Status,
 }
 
 pub struct Row<'a> {
     pub worktree: &'a w3::Worktree,
     pub current: bool,
+    pub status: Option<Result<w3::Status, String>>,
 }
 
 impl FromStr for Column {
@@ -77,6 +79,7 @@ impl FromStr for Field {
             "locked" => Ok(Field::Locked),
             "prunable" => Ok(Field::Prunable),
             "current" => Ok(Field::Current),
+            "status" => Ok(Field::Status),
             other => Err(format!("unknown field: {other}")),
         }
     }
@@ -100,6 +103,7 @@ impl Field {
             Field::Locked => "locked",
             Field::Prunable => "prunable",
             Field::Current => "current",
+            Field::Status => "status",
         }
     }
 }
@@ -245,15 +249,35 @@ fn state(row: &Row, with_current: bool) -> String {
         (worktree.locked.is_some(), "locked"),
         (worktree.prunable.is_some(), "prunable"),
     ];
-    flags
+    let mut states: Vec<String> = flags
         .iter()
         .filter(|(set, _)| *set)
-        .map(|(_, flag)| *flag)
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(|(_, flag)| flag.to_string())
+        .collect();
+    match &row.status {
+        Some(Ok(status)) => {
+            states.push(if status.dirty() { "dirty" } else { "clean" }.into());
+            if status.conflicted {
+                states.push("conflicted".into());
+            }
+            if let Some(ahead) = status.ahead {
+                states.push(format!("ahead={ahead}"));
+            }
+            if let Some(behind) = status.behind {
+                states.push(format!("behind={behind}"));
+            }
+        }
+        Some(Err(_)) => states.push("status-unavailable".into()),
+        None => {}
+    }
+    states.join(" ")
 }
 
 pub fn json(rows: &[Row], fields: &[Field]) -> String {
+    format!("{}\n", records(rows, fields))
+}
+
+pub fn records(rows: &[Row], fields: &[Field]) -> serde_json::Value {
     let objects: Vec<serde_json::Value> = rows
         .iter()
         .map(|row| {
@@ -264,7 +288,7 @@ pub fn json(rows: &[Row], fields: &[Field]) -> String {
             serde_json::Value::Object(object)
         })
         .collect();
-    format!("{}\n", serde_json::Value::Array(objects))
+    serde_json::Value::Array(objects)
 }
 
 fn json_value(row: &Row, field: Field) -> serde_json::Value {
@@ -277,6 +301,21 @@ fn json_value(row: &Row, field: Field) -> serde_json::Value {
         Field::Locked => worktree.locked.as_deref().into(),
         Field::Prunable => worktree.prunable.as_deref().into(),
         Field::Current => row.current.into(),
+        Field::Status => match &row.status {
+            Some(Ok(status)) => serde_json::json!({
+                "available": true, "dirty": status.dirty(), "staged": status.staged,
+                "unstaged": status.unstaged, "untracked": status.untracked,
+                "conflicted": status.conflicted, "upstream": status.upstream,
+                "ahead": status.ahead, "behind": status.behind, "error": null,
+            }),
+            Some(Err(error)) => serde_json::json!({
+                "available": false, "dirty": null, "staged": null, "unstaged": null,
+                "untracked": null, "conflicted": null, "upstream": null,
+                "ahead": null, "behind": null,
+                "error": {"code": "status_unavailable", "message": error},
+            }),
+            None => serde_json::Value::Null,
+        },
     }
 }
 
@@ -294,7 +333,7 @@ mod tests {
         Column::State,
         Column::Path,
     ];
-    const ALL_FIELDS: [Field; 7] = [
+    const DEFAULT_FIELDS: [Field; 7] = [
         Field::Path,
         Field::Head,
         Field::Branch,
@@ -391,6 +430,7 @@ mod tests {
         let rows = [Row {
             worktree: &main,
             current: false,
+            status: None,
         }];
         assert_eq!(
             plain(
@@ -408,6 +448,7 @@ mod tests {
         let rows = [Row {
             worktree: &detached,
             current: true,
+            status: None,
         }];
         assert_eq!(
             plain(
@@ -425,6 +466,7 @@ mod tests {
         let rows = [Row {
             worktree: &all,
             current: true,
+            status: None,
         }];
         assert_eq!(
             plain(&rows, &[Column::State], 8),
@@ -442,6 +484,7 @@ mod tests {
         let rows = [Row {
             worktree: &main,
             current: false,
+            status: None,
         }];
         assert_eq!(
             plain(&rows, &[Column::Branch, Column::Head], 12),
@@ -457,10 +500,12 @@ mod tests {
             Row {
                 worktree: &a,
                 current: true,
+                status: None,
             },
             Row {
                 worktree: &b,
                 current: false,
+                status: None,
             },
         ];
         assert_eq!(
@@ -479,10 +524,12 @@ mod tests {
             Row {
                 worktree: &a,
                 current: false,
+                status: None,
             },
             Row {
                 worktree: &b,
                 current: true,
+                status: None,
             },
         ];
         let columns = [Column::Name, Column::Branch, Column::Path];
@@ -503,10 +550,12 @@ mod tests {
             Row {
                 worktree: &inside,
                 current: false,
+                status: None,
             },
             Row {
                 worktree: &outside,
                 current: false,
+                status: None,
             },
         ];
         assert_eq!(
@@ -528,6 +577,7 @@ mod tests {
         let rows = [Row {
             worktree: &root,
             current: false,
+            status: None,
         }];
         assert_eq!(table(&rows, &[Column::Name], 8, None), "  NAME\n\x20 /\n");
     }
@@ -540,10 +590,12 @@ mod tests {
             Row {
                 worktree: &umlaut,
                 current: false,
+                status: None,
             },
             Row {
                 worktree: &ascii,
                 current: false,
+                status: None,
             },
         ];
         assert_eq!(
@@ -564,9 +616,10 @@ mod tests {
         let rows = [Row {
             worktree: &detached,
             current: true,
+            status: None,
         }];
         assert_eq!(
-            json(&rows, &ALL_FIELDS),
+            json(&rows, &DEFAULT_FIELDS),
             format!(
                 "[{{\"path\":\"/repo\",\"head\":\"{HEAD}\",\"branch\":null,\"bare\":false,\"locked\":null,\"prunable\":null,\"current\":true}}]\n"
             )
@@ -579,6 +632,7 @@ mod tests {
         let rows = [Row {
             worktree: &all,
             current: false,
+            status: None,
         }];
         assert_eq!(
             json(&rows, &[Field::Prunable, Field::Locked, Field::Branch]),
@@ -588,6 +642,6 @@ mod tests {
 
     #[test]
     fn empty_json_is_an_empty_array() {
-        assert_eq!(json(&[], &ALL_FIELDS), "[]\n");
+        assert_eq!(json(&[], &DEFAULT_FIELDS), "[]\n");
     }
 }

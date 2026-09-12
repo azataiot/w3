@@ -28,7 +28,8 @@ A name uses ASCII letters, digits, `-`, `_`, and `/` only. Any other
 character, a dot or a parenthesis for example, is refused with one line that
 names it. This keeps every name w3 makes a plain word for the pattern of
 [`w3 list`](list.md#find-a-worktree). A name that is empty or starts with
-`-` is refused too.
+`-` is refused too, as are empty slash-separated components such as `a//b`.
+The core library applies the same creation-name policy to `add` and `cp`.
 
 ## Your local files
 
@@ -60,7 +61,7 @@ that says so.
 
 | Flag | Effect |
 |---|---|
-| `-b, --branch <branch>` | Check out an existing branch instead of creating one. The name still names the directory. Tab completes it from the branches no worktree holds, once [completion](README.md#tab-completion) is set up |
+| `-b, --branch <branch>` | Check out an existing branch instead of creating one. The name still names the directory. Tab completes it from the branches no worktree holds, once [completion](README.md#shell-setup) is set up |
 | `--base <ref>` | Start the new branch at this commit or branch instead of `HEAD`, for example `origin/main` |
 | `--path <template>` | Put the worktree somewhere else, see below |
 | `--include <file>` | Use another include file, relative to the main checkout. An empty value copies nothing |
@@ -88,4 +89,10 @@ w3 stops before it touches anything when:
 - the branch exists and you did not pass `-b`
 - the main checkout is bare, because there is nothing to copy from
 
-Every error is one line on stderr and exit code 1.
+If file transfer fails after creation, w3 attempts to remove the new worktree
+and newly created branch. With `-b`, it preserves the existing branch.
+If cleanup fails, the error includes both failures and identifies remaining state.
+
+Human operation errors go to stderr with exit code 1. Invalid arguments use
+exit code 2. `--format json` returns the [shared envelope](json.md), including
+copy reports and rollback state.

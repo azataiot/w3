@@ -13,6 +13,8 @@ This guide has one page per command and one for the settings:
 | [add](add.md) | Start a new branch in a new directory, with your local files in place |
 | [cp](cp.md) | Copy the worktree you are in, unfinished changes included, and continue in a copy |
 | [cd](cd.md) | Go to a worktree from a list that filters as you type, or by name |
+| [remove](remove.md) | Remove a clean worktree without deleting its branch |
+| [machine interface](json.md) | Use JSON results, status, and structured recovery from an agent |
 | [configuration](configuration.md) | Change the defaults once, for you or for one repository |
 
 ## The five-minute tour
@@ -53,8 +55,9 @@ w3 cd fix-login
 One match, so you are there at once. `w3 cd` alone opens a list that filters
 as you type, once the [shell function](#shell-setup) is loaded.
 
-Every command prints the path of the worktree on stdout and everything else
-on stderr, so `cd "$(w3 …)"` always works.
+In human mode, `add`, `cp`, and `cd` print a path on stdout and reports on
+stderr. Every command also accepts `--format json`. JSON returns an envelope,
+not a bare path, and must be parsed before use.
 
 ## Shell setup
 

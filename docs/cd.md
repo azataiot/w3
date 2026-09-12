@@ -82,7 +82,21 @@ of the repository.
 
 ## In a script or an agent
 
-Without a terminal there is no list. One match prints its path:
+For agents, request the [JSON interface](json.md) explicitly:
+
+```sh
+w3 cd '^fix-login$' --format json
+```
+
+One match returns `data.path` in the shared envelope. Multiple matches return
+`ambiguous_worktree` with `error.details.candidates`. No match returns
+`worktree_not_found`. JSON mode never opens the picker, even on a terminal.
+
+The shell function passes JSON through without changing directories, including
+on failure. Inspect `ok` and the exit code before using `data.path`.
+Do not put the JSON document directly inside `cd "$(…)"`.
+
+In plain mode, without a terminal there is no list. One match prints its path:
 
 ```sh
 cd "$(w3 cd fix-login)"
@@ -90,4 +104,9 @@ cd "$(w3 cd fix-login)"
 
 Several matches are an error on stderr that names them, exit 1. Give a
 pattern that matches one worktree. A cancelled list exits 130 and prints
-nothing, so `cd "$(w3 cd)"` stays in place on Esc.
+nothing. The shell function preserves the current directory on cancellation.
+Without it, guard the command before changing directories:
+
+```sh
+target="$(w3 cd)" && cd -- "$target"
+```

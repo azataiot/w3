@@ -27,6 +27,9 @@ pub fn list(repo: &Path) -> Result<Vec<Worktree>, Error> {
 }
 
 pub fn add(repo: &Path, path: &Path, branch: Branch, base: Option<&str>) -> Result<(), Error> {
+    if let Branch::New(name) = branch {
+        crate::validate_name(name)?;
+    }
     let mut command = git(repo);
     command.args(["worktree", "add", "-q"]).arg(path);
     match branch {
@@ -108,6 +111,73 @@ pub fn apply(worktree: &Path, patch: &[u8], apply: Apply) -> Result<(), Error> {
 
 pub fn remove(repo: &Path, path: &Path) -> Result<(), Error> {
     run(git(repo).args(["worktree", "remove", "--force"]).arg(path)).map(drop)
+}
+
+pub fn status(worktree: &Path) -> Result<crate::Status, Error> {
+    let stdout = run(git(worktree).args([
+        "--no-optional-locks",
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "-z",
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+    ]))?;
+    crate::status::parse(&stdout)
+}
+
+pub fn remove_clean(repo: &Path, path: &Path) -> Result<(), Error> {
+    remove_checked(repo, path, false)
+}
+
+pub fn remove_checked(repo: &Path, path: &Path, force: bool) -> Result<(), Error> {
+    let worktrees = list(repo)?;
+    let cwd = repo.canonicalize()?;
+    let target = path.canonicalize()?;
+    let Some((index, worktree)) = worktrees
+        .iter()
+        .enumerate()
+        .find(|(_, worktree)| worktree.path.canonicalize().ok().as_ref() == Some(&target))
+    else {
+        return Err(Error::UnsafeRemoval {
+            reason: "not_a_worktree",
+            path: target,
+        });
+    };
+    let reason = if index == 0 {
+        Some("main_worktree")
+    } else if cwd.starts_with(&target) {
+        Some("current_worktree")
+    } else if worktree.bare {
+        Some("bare_worktree")
+    } else if worktree.locked.is_some() {
+        Some("locked_worktree")
+    } else if worktree.prunable.is_some() {
+        Some("prunable_worktree")
+    } else if worktrees
+        .iter()
+        .any(|other| other.path != worktree.path && other.path.starts_with(&worktree.path))
+    {
+        Some("nested_worktree")
+    } else if !force && status(&target)?.dirty() {
+        Some("dirty_worktree")
+    } else if !force && !ls_files(&target, &["--ignored", "--exclude-standard"])?.is_empty() {
+        Some("ignored_files")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        return Err(Error::UnsafeRemoval {
+            reason,
+            path: target,
+        });
+    }
+    let mut command = git(repo);
+    command.args(["worktree", "remove"]);
+    if force {
+        command.arg("--force");
+    }
+    run(command.arg(&target)).map(drop)
 }
 
 pub fn delete_branch(repo: &Path, name: &str) -> Result<(), Error> {

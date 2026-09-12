@@ -121,6 +121,16 @@ fn add_checks_out_an_existing_branch() {
 }
 
 #[test]
+fn library_creation_enforces_names_before_git_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let missing_repo = tmp.path().join("missing");
+    let target = tmp.path().join("target");
+    let error = w3::add(&missing_repo, &target, w3::Branch::New("release.1"), None).unwrap_err();
+    assert!(matches!(error, w3::Error::InvalidName(_)));
+    assert!(!target.exists());
+}
+
+#[test]
 fn add_refusal_is_a_git_error() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = repo_with_commit(tmp.path());

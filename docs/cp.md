@@ -34,6 +34,7 @@ copied .env
 
 ## What the copy does not carry
 
+- An atomic snapshot while another user or process writes to the source
 - The stash, the reflog, and anything else outside the working tree
 - Submodule state
 - A file that git ignores and `.worktreeinclude` does not name
@@ -58,9 +59,16 @@ setting does not apply here either.
 
 ## When something fails
 
-If a step fails after the new worktree exists, w3 removes the worktree and
-the branch again, and prints the error. You can fix the cause and run the
-same command again. Lines that say `copied` may already be on stderr from
-before the failure. They describe files the rollback removed.
+If transfer fails after creation, w3 attempts to remove the worktree and
+new branch. After successful cleanup, fix the cause and retry.
+If cleanup fails, inspect the reported remaining state before you retry.
+Lines that say `copied` may already be on stderr from before the failure.
+After successful cleanup, they describe files that rollback removed.
 
 `w3 cp` needs a worktree to copy. Run it from inside one.
+
+Copy does not lock or pause the source. Coordinate with other writers when
+consistency matters. Parallel reads would not guarantee a consistent snapshot.
+
+`--format json` returns the [shared envelope](json.md), including the attempted
+path, copy reports, and rollback state on post-creation failures.

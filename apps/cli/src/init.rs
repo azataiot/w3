@@ -31,8 +31,12 @@ fn posix_script(exe: &str, completion: &str) -> String {
         \x20       {exe} \"$@\"\n\
         \x20       return\n\
         \x20   fi\n\
-        \x20   local target\n\
-        \x20   target=\"$({exe} \"$@\")\" || return\n\
+        \x20   local target result\n\
+        \x20   target=\"$({exe} \"$@\")\" && result=0 || result=$?\n\
+        \x20   if [ \"$result\" -ne 0 ]; then\n\
+        \x20       [ -z \"$target\" ] || printf '%s\\n' \"$target\"\n\
+        \x20       return \"$result\"\n\
+        \x20   fi\n\
         \x20   if [ -d \"$target\" ]; then\n\
         \x20       builtin cd -- \"$target\"\n\
         \x20   else\n\
@@ -51,7 +55,13 @@ fn fish_script(exe: &str) -> String {
         \x20       return\n\
         \x20   end\n\
         \x20   set -l target ({exe} $argv)\n\
-        \x20   or return\n\
+        \x20   set -l result $status\n\
+        \x20   if test $result -ne 0\n\
+        \x20       if test (count $target) -gt 0\n\
+        \x20           printf '%s\\n' $target\n\
+        \x20       end\n\
+        \x20       return $result\n\
+        \x20   end\n\
         \x20   if test -d \"$target\"\n\
         \x20       cd \"$target\"\n\
         \x20   else\n\

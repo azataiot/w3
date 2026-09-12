@@ -16,6 +16,7 @@ pub fn candidates<'a>(
         .map(|(index, worktree)| Row {
             worktree,
             current: Some(index) == current,
+            status: None,
         })
         .collect()
 }

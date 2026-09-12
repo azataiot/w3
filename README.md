@@ -10,6 +10,31 @@ The name is a typo. Late one night, ten worktrees deep, I typed “workthree”
 instead of “worktree”. Three was as far as I could still count. The typo
 shipped.
 
+## Features
+
+- **Fork unfinished work.** `w3 cp` carries staged, unstaged, and untracked
+  changes into a new worktree, without a stash or temporary commit.
+- **One interface for agents.** Every command supports `--format json`,
+  with a versioned envelope, error codes, and noninteractive results.
+- **Navigate from the terminal.** Select a worktree by pattern or use the
+  fuzzy picker, with completion for bash, zsh, and fish.
+- **Bring local files along.** `.worktreeinclude` selects the ignored files
+  that a new checkout needs.
+- **Inspect before cleanup.** `w3 list --status` shows dirty state and local
+  upstream divergence. `w3 remove` keeps branches and protects current or locked
+  targets. Use `--force` to explicitly discard local changes and ignored files.
+- **Use ordinary Git worktrees.** No daemon or separate worktree registry.
+
+The shared JSON envelope, status inspection, removal, and agent skill are
+development features in this source checkout. They are not in `0.1.0-alpha.3`.
+Run these commands from the root of the checkout that contains the changes,
+not another checkout of the same repository:
+
+```sh
+cargo build -p w3-cli
+./target/debug/w3 list --status --format json
+```
+
 ## Install
 
 w3 is pre-release. Homebrew is the recommended path:
@@ -18,11 +43,15 @@ w3 is pre-release. Homebrew is the recommended path:
 brew install azataiot/tap/w3
 ```
 
-The install script installs the latest stable release:
+Only pre-releases are available at present. To install the current alpha
+with the install script:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/azataiot/w3/main/scripts/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/azataiot/w3/main/scripts/install.sh | W3_VERSION=0.1.0-alpha.3 sh
 ```
+
+Without `W3_VERSION`, the script requests the latest stable release and fails
+until one exists.
 
 From crates.io, with a Rust toolchain:
 
@@ -59,10 +88,12 @@ w3 init fish | source
 | Command | What it does |
 |---|---|
 | `w3 list` | List the worktrees of the current repository |
+| `w3 list --status` | Include dirty state and local upstream divergence |
 | `w3 add <name>` | Create a worktree on a new branch and print its path |
 | `w3 cp <name>` | Copy the current worktree, changes included, onto a new branch and print its path |
 | `w3 cd [pattern]` | Go to a worktree, picked from a list that filters as you type, or by pattern |
 | `w3 init <shell>` | Print the shell function that makes `w3 cd` change directory and loads completion |
+| `w3 remove <target>` | Remove one clean worktree by exact name, branch, or path, keeping its branch |
 
 Every command takes `--help`. The [user guide](docs/README.md) has one page
 per command and one for the settings.
@@ -91,6 +122,10 @@ For an agent or a script, JSON with the full SHA:
 ```sh
 w3 list --format json
 ```
+
+JSON uses a shared envelope. List records are under `data.worktrees`, not a
+top-level array. See the [machine interface](docs/json.md) for the schema,
+error codes, copy reports, and migration from the alpha.3 output.
 
 Flags override everything: `--format table|plain|json`, `--head-length N`,
 `--columns name,branch,head,state,path`, `--fields path,head,branch,bare,locked,prunable,current`.
@@ -146,9 +181,31 @@ cd "$(w3 cp spike)"
 the unstaged changes into the working tree. It copies the untracked files, and
 the gitignored files that `.worktreeinclude` names. The include file comes
 from the main checkout, the files from the worktree you copy. Each copied file
-is one line on stderr. If a step fails after the worktree exists, w3 removes
-it and the branch again. `--path` and `--include` work as in `w3 add`.
+is one line on stderr. If transfer fails after creation, w3 attempts to remove
+the worktree and new branch, and reports any cleanup failure.
+`--path` and `--include` work as in `w3 add`.
 `add.base` does not apply.
+
+Copy does not lock the source or provide an atomic snapshot while another
+process writes. Coordinate with other users and agents when consistency matters.
+
+### Agent skill
+
+The repository includes a [w3 skill](skills/w3/SKILL.md) with command selection,
+JSON parsing, and recovery guidance. Install it from a local checkout:
+
+```sh
+npx skills@latest add ./skills --skill w3
+```
+
+Install the skill from GitHub:
+
+```sh
+npx skills@latest add azataiot/w3 --skill w3
+```
+
+The skill installs instructions, not the binary. It checks for JSON schema
+version 1 before it uses the new interface.
 
 ### Configure
 
@@ -186,11 +243,11 @@ same keys sit under `[w3]`, `[w3.format]`, `[w3.table]`, `[w3.plain]`,
 
 ## Layout
 
-```text
-apps/cli      the w3 binary (package w3-cli)
-crates/w3     library: worktree discovery, porcelain parsing
-packages/     TypeScript packages, none yet
-```
+| Path | Purpose |
+|---|---|
+| [apps/cli](apps/cli/README.md) | The `w3` binary, published as `w3-cli` |
+| [crates/w3](crates/w3/README.md) | Library for Git worktree discovery, parsing, and operations |
+| [docs](docs/README.md) | User guide |
 
 ## Develop
 
