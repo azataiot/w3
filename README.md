@@ -25,8 +25,8 @@ shipped.
   targets. Use `--force` to explicitly discard local changes and ignored files.
 - **Use ordinary Git worktrees.** No daemon or separate worktree registry.
 
-The shared JSON envelope, status inspection, removal, and agent skill are
-development features in this source checkout. They are not in `0.1.0-alpha.3`.
+The shared JSON envelope, status inspection, and removal require
+`0.1.0-alpha.4` or later. See the [release notes](CHANGELOG.md).
 Run these commands from the root of the checkout that contains the changes,
 not another checkout of the same repository:
 
@@ -47,7 +47,7 @@ Only pre-releases are available at present. To install the current alpha
 with the install script:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/azataiot/w3/main/scripts/install.sh | W3_VERSION=0.1.0-alpha.3 sh
+curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/azataiot/w3/main/scripts/install.sh | W3_VERSION=0.1.0-alpha.4 sh
 ```
 
 Without `W3_VERSION`, the script requests the latest stable release and fails

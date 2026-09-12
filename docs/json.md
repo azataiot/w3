@@ -5,7 +5,7 @@ Every command accepts `--format json`, before or after its subcommand.
 File-based format defaults continue to apply to `list` only.
 Use an explicit JSON flag for agents, including when configuration is invalid.
 
-This is the development schema, version 1. It is not available in alpha.3.
+Schema version 1 requires w3 `0.1.0-alpha.4` or later.
 The version number describes the JSON contract, not the binary version.
 
 ## Envelope

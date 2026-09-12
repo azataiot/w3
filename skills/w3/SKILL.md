@@ -10,7 +10,7 @@ instructions, not the binary. Git 2.36 or later must be on `PATH`.
 
 ## Check capability
 
-This skill requires JSON schema version 1, introduced after alpha.3.
+This skill requires JSON schema version 1, introduced in `0.1.0-alpha.4`.
 Do not rely only on the binary's version string. Probe the interface:
 
 ```sh

@@ -66,7 +66,7 @@ w3 list --format json
 `locked` and `prunable` carry the reason git recorded, or `null`. `branch` is
 `null` for a detached worktree.
 
-This development interface replaces the top-level array from alpha.3.
+The alpha.4 interface replaces the top-level array from alpha.3.
 See the [machine interface](json.md) for migration and error handling.
 
 ## Inspect unfinished work

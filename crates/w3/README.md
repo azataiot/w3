@@ -13,7 +13,7 @@ The current API is pre-release:
 
 ```toml
 [dependencies]
-w3 = "0.1.0-alpha.3"
+w3 = "0.1.0-alpha.4"
 ```
 
 List the worktrees for the repository that contains the current directory:
@@ -62,8 +62,7 @@ Errors distinguish process/I/O failures (`Spawn`), unsuccessful Git commands
 (`Git`), invalid porcelain input (`Parse`), invalid creation names
 (`InvalidName`), and unsafe removal (`UnsafeRemoval`).
 
-The validation, status, and safe-removal APIs are development additions.
-They are not in the published `0.1.0-alpha.3` library.
+The validation, status, and checked-removal APIs require `0.1.0-alpha.4` or later.
 
 ## Caller responsibilities
 

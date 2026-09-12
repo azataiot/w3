@@ -79,8 +79,7 @@ If cleanup fails, inspect the reported remaining state before you retry.
 Every command accepts `--format json`. Results use a versioned envelope with
 `schema_version`, `command`, `ok`, `data`, and `error`. JSON mode never prompts.
 See the [machine interface](https://github.com/azataiot/w3/blob/main/docs/json.md).
-This interface, status inspection, and removal are development features that
-are not in the published `0.1.0-alpha.3` binary.
+This interface, status inspection, and removal require `0.1.0-alpha.4` or later.
 
 Configuration precedence is: built-in defaults, user configuration,
 the repository's `[w3]` table in `az.toml`, environment variables, then flags.
